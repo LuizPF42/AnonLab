@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anonimizador de Documentos — offline</title>
+<!--
+  FERRAMENTA AIRGAPPED. Arquivo único, sem instalador, sem rede.
+  Auditoria: este arquivo NÃO contém nenhum http://, fetch, XMLHttpRequest
+  ou import externo. Tudo roda no seu navegador, em memória.
+  Abra com duplo clique. Nada é enviado para lugar nenhum.
+-->
+<style>
+  :root{
+    --bg:#0f1420; --panel:#171d2b; --panel2:#1d2433; --line:#2a3346;
+    --txt:#e7ecf3; --mut:#93a0b5; --acc:#4da3ff; --acc2:#2b6fb8;
+    --hi:#ffd24d; --ok:#3fd17a; --warn:#ff8d6b; --bad:#ff6b6b;
+    --c-alta:#3fd17a; --c-media:#ffd24d; --c-baixa:#ff8d6b;
+    --radius:10px; --mono:ui-monospace,Consolas,"Cascadia Code",monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:14px;line-height:1.45}
+  header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:var(--panel)}
+  header h1{font-size:16px;margin:0;font-weight:650}
+  .badge{font-size:11px;padding:3px 9px;border-radius:999px;background:#10341f;color:var(--ok);border:1px solid #1e5e38;font-weight:600}
+  .badge.net{background:#10341f}
+  .sub{color:var(--mut);font-size:12px}
+  main{display:grid;grid-template-columns:380px 1fr;gap:0;min-height:calc(100vh - 53px)}
+  @media (max-width:880px){main{grid-template-columns:1fr}}
+  .col{padding:16px;overflow:auto}
+  .left{border-right:1px solid var(--line);background:var(--panel)}
+  .card{background:var(--panel2);border:1px solid var(--line);border-radius:var(--radius);padding:12px;margin-bottom:14px}
+  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:0 0 10px}
+  textarea{width:100%;background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:10px;font-family:var(--mono);font-size:13px;resize:vertical}
+  #input{min-height:150px}
+  #freeterms{min-height:54px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .row.between{justify-content:space-between}
+  button{background:var(--acc2);color:#fff;border:1px solid var(--acc);border-radius:8px;padding:8px 12px;font-size:13px;cursor:pointer;font-weight:600}
+  button:hover{background:var(--acc)}
+  button.ghost{background:transparent;color:var(--acc);border-color:var(--line)}
+  button.ghost:hover{background:#0d2238;border-color:var(--acc)}
+  button.sm{padding:4px 8px;font-size:12px;font-weight:500}
+  button.big{width:100%;padding:11px;font-size:14px;margin-top:4px}
+  label.file{display:inline-block}
+  input[type=file]{display:none}
+  .grp{border:1px solid var(--line);border-radius:8px;margin-bottom:8px;overflow:hidden}
+  .grp>summary{cursor:pointer;padding:8px 10px;background:var(--bg);font-weight:600;font-size:13px;list-style:none;display:flex;justify-content:space-between;align-items:center}
+  .grp>summary::-webkit-details-marker{display:none}
+  .grp .opts{padding:6px 10px}
+  .chk{display:flex;align-items:center;gap:7px;padding:3px 0;font-size:13px;cursor:pointer}
+  .chk input{accent-color:var(--acc);width:15px;height:15px}
+  .chk .tag{font-size:10px;color:var(--mut);margin-left:auto}
+  .tag.s{color:var(--warn);font-weight:700}
+  .opt-inline{display:flex;gap:14px;margin-top:6px}
+  .opt-inline .chk{font-size:12px;color:var(--mut)}
+  /* review */
+  .stats{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .stat{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 11px;min-width:78px}
+  .stat b{font-size:18px;display:block}
+  .stat span{font-size:11px;color:var(--mut)}
+  .toolbar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center}
+  .toolbar .sep{flex:1}
+  .review{display:flex;flex-direction:column;gap:6px}
+  .item{display:grid;grid-template-columns:22px 1fr auto;gap:10px;align-items:center;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  .item.off{opacity:.45}
+  .item input[type=checkbox]{width:16px;height:16px;accent-color:var(--ok)}
+  .kwic{font-family:var(--mono);font-size:12.5px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .kwic mark{background:#3a2f12;color:var(--hi);padding:0 2px;border-radius:3px}
+  .meta{display:flex;gap:8px;align-items:center;white-space:nowrap}
+  .pill{font-size:10px;padding:2px 7px;border-radius:999px;border:1px solid var(--line);color:var(--mut)}
+  .pill.type{color:var(--acc);border-color:var(--acc2)}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+  .cnt{font-size:11px;color:var(--mut)}
+  .empty{color:var(--mut);text-align:center;padding:30px;font-size:13px}
+  .out-head{display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px}
+  #output{min-height:160px;background:var(--bg)}
+  .note{font-size:11.5px;color:var(--mut);margin-top:6px}
+  .note.warn{color:var(--warn)}
+  details.help summary{cursor:pointer;color:var(--acc);font-size:12px}
+  code{font-family:var(--mono);background:var(--bg);padding:1px 5px;border-radius:4px;font-size:12px}
+  a{color:var(--acc)}
+</style>
+</head>
+<body>
+<header>
+  <h1>🛡️ Anonimizador de Documentos</h1>
+  <span class="badge net" id="netbadge">● offline · nada sai daqui</span>
+  <span class="sub">protótipo v0 · arquivo único · sem instalador</span>
+</header>
+
+<main>
+  <!-- COLUNA ESQUERDA: entrada e configuração -->
+  <section class="col left">
+    <div class="card">
+      <h2>1 · Documento</h2>
+      <textarea id="input" placeholder="Cole aqui o texto a anonimizar…"></textarea>
+      <div class="row between" style="margin-top:8px">
+        <div class="row">
+          <label class="file"><input type="file" id="file" accept=".txt,text/plain"><button class="ghost sm" onclick="document.getElementById('file').click()">📂 Abrir .txt</button></label>
+          <button class="ghost sm" id="sample">Exemplo</button>
+        </div>
+        <span class="sub" id="charcount">0 caracteres</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>2 · Termos livres do pesquisador</h2>
+      <textarea id="freeterms" placeholder="Um por linha ou separados por vírgula: apelidos, codinomes, locais específicos…"></textarea>
+      <div class="opt-inline">
+        <label class="chk"><input type="checkbox" id="ft-word" checked> palavra inteira</label>
+        <label class="chk"><input type="checkbox" id="ft-ci" checked> ignorar maiúsc.</label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>3 · Categorias (caixinhas)</h2>
+      <div id="categories"></div>
+    </div>
+
+    <div class="card">
+      <h2>4 · Substituição</h2>
+      <label class="chk"><input type="radio" name="mode" value="tag" checked> Rótulo por tipo — <code>[PESSOA_1]</code></label>
+      <label class="chk"><input type="radio" name="mode" value="redact"> Tarja — <code>[REMOVIDO]</code></label>
+      <button class="big" id="detect">🔎 Detectar candidatos</button>
+    </div>
+
+    <details class="help">
+      <summary>Como funciona / privacidade</summary>
+      <p class="note">Quatro camadas: <b>padrões</b> (CPF, e-mail, telefone… com validação de dígito), <b>listas</b> (estados, capitais, países), <b>heurística de nomes</b> (sugestões para você revisar) e seus <b>termos livres</b>. A ferramenta <b>sugere</b>; você decide. Roda 100% no navegador, offline. Veja <code>claude.md</code> para o design completo.</p>
+    </details>
+  </section>
+
+  <!-- COLUNA DIREITA: revisão e saída -->
+  <section class="col">
+    <div class="stats">
+      <div class="stat"><b id="s-total">0</b><span>candidatos</span></div>
+      <div class="stat"><b id="s-on">0</b><span>aceitos</span></div>
+      <div class="stat"><b id="s-occ">0</b><span>ocorrências</span></div>
+      <div class="stat"><b id="s-sens" style="color:var(--warn)">0</b><span>sensíveis 🔴</span></div>
+    </div>
+
+    <div class="toolbar">
+      <button class="ghost sm" id="sel-all">Aceitar todos</button>
+      <button class="ghost sm" id="sel-none">Rejeitar todos</button>
+      <button class="ghost sm" id="sel-high">Só alta confiança</button>
+      <button class="ghost sm" id="sel-names">+ Aceitar nomes</button>
+      <span class="sep"></span>
+      <span class="sub">confiança:
+        <span class="dot" style="background:var(--c-alta)"></span> alta
+        <span class="dot" style="background:var(--c-media)"></span> média
+        <span class="dot" style="background:var(--c-baixa)"></span> baixa
+      </span>
+    </div>
+
+    <div class="review" id="review">
+      <div class="empty">Cole um texto (ou clique <b>Exemplo</b>) e aperte <b>Detectar candidatos</b>.<br>Os achados aparecem aqui, cada um com o trecho ao redor para você revisar.</div>
+    </div>
+
+    <div class="out-head">
+      <h2 style="margin:0;font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Resultado anonimizado</h2>
+      <div class="row">
+        <button class="ghost sm" id="apply">↻ Aplicar</button>
+        <button class="ghost sm" id="copy">Copiar</button>
+        <button class="ghost sm" id="dl">Baixar .txt</button>
+        <button class="ghost sm" id="dl-key">Codebook 🔑</button>
+      </div>
+    </div>
+    <textarea id="output" placeholder="O texto anonimizado aparece aqui depois de Detectar + Aplicar."></textarea>
+    <p class="note warn">⚠️ Isto <b>assiste</b> a anonimização, não a garante. Quase-identificadores (data + profissão rara + cidade pequena) ainda podem reidentificar. Revise sempre. O <b>codebook</b> reidentifica os dados — guarde separado ou descarte.</p>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+/* ===================== utilidades ===================== */
+const $ = s => document.querySelector(s);
+const onlyDigits = s => s.replace(/\D/g,"");
+const escHtml = s => s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+
+/* ---- validadores (cortam falso-positivo) ---- */
+function validCPF(s){
+  const c = onlyDigits(s);
+  if(c.length!==11 || /^(\d)\1{10}$/.test(c)) return false;
+  let sum=0; for(let i=0;i<9;i++) sum += +c[i]*(10-i);
+  let d=(sum*10)%11; if(d===10) d=0; if(d!==+c[9]) return false;
+  sum=0; for(let i=0;i<10;i++) sum += +c[i]*(11-i);
+  d=(sum*10)%11; if(d===10) d=0; return d===+c[10];
+}
+function validCNPJ(s){
+  const c = onlyDigits(s);
+  if(c.length!==14 || /^(\d)\1{13}$/.test(c)) return false;
+  const dv = len => { let w=len-7,sum=0; for(let i=0;i<len;i++){ sum+=+c[i]*w; w=(w===2)?9:w-1; } const r=sum%11; return r<2?0:11-r; };
+  return dv(12)===+c[12] && dv(13)===+c[13];
+}
+function luhn(s){
+  const c=onlyDigits(s); if(c.length<13) return false;
+  let sum=0,alt=false;
+  for(let i=c.length-1;i>=0;i--){ let n=+c[i]; if(alt){ n*=2; if(n>9)n-=9; } sum+=n; alt=!alt; }
+  return sum%10===0;
+}
+
+/* ===================== gazetteers ===================== */
+const ESTADOS = ["Acre","Alagoas","Amapá","Amazonas","Bahia","Ceará","Distrito Federal","Espírito Santo","Goiás","Maranhão","Mato Grosso do Sul","Mato Grosso","Minas Gerais","Pará","Paraíba","Paraná","Pernambuco","Piauí","Rio Grande do Norte","Rio Grande do Sul","Rio de Janeiro","Rondônia","Roraima","Santa Catarina","São Paulo","Sergipe","Tocantins"];
+const CAPITAIS = ["Rio Branco","Maceió","Macapá","Manaus","Salvador","Fortaleza","Brasília","Vitória","Goiânia","São Luís","Cuiabá","Campo Grande","Belo Horizonte","Belém","João Pessoa","Curitiba","Recife","Teresina","Rio de Janeiro","Natal","Porto Alegre","Porto Velho","Boa Vista","Florianópolis","São Paulo","Aracaju","Palmas"];
+const PAISES = ["Brasil","Portugal","Angola","Moçambique","Cabo Verde","Guiné-Bissau","São Tomé e Príncipe","Timor-Leste","Argentina","Uruguai","Paraguai","Chile","Bolívia","Peru","Colômbia","Venezuela","Equador","Estados Unidos","Canadá","México","Espanha","França","Itália","Alemanha","Reino Unido","Inglaterra","Irlanda","Países Baixos","Holanda","Bélgica","Suíça","Áustria","Suécia","Noruega","Dinamarca","Finlândia","Rússia","China","Japão","Coreia do Sul","Índia","Austrália","África do Sul","Nigéria","Egito"];
+
+// regex de lista respeitando fronteira de letras (com acento)
+function gazRegex(list){
+  const alt = [...list].sort((a,b)=>b.length-a.length).map(escRe).join("|");
+  return new RegExp("(?<![\\p{L}])(?:"+alt+")(?![\\p{L}])","gu");
+}
+
+/* ===================== heurística de nomes ===================== */
+const STOP = new Set(["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro","segunda","terça","quarta","quinta","sexta","sábado","domingo","a","o","as","os","um","uma","ele","ela","eles","elas","eu","nós","você","vocês","este","esta","esse","essa","isso","isto","aquele","aquela","quando","onde","como","porque","por","para","mas","então","também","sim","não","sr","sra","srta","dr","dra","senhor","senhora","entrevista","entrevistado","entrevistador","pesquisa","pesquisador","obs","nota","após","antes","durante","segundo","conforme","embora","apesar","portanto","além","ainda","já","hoje","ontem","amanhã"]);
+const NAME_RE = /(?<![\p{L}])(\p{Lu}[\p{Ll}'-]+(?:\s+(?:d[aeo]s?\s+)?\p{Lu}[\p{Ll}'-]+)*)/gu;
+
+function findNames(text){
+  const out=[];
+  for(const m of text.matchAll(NAME_RE)){
+    const val=m[1]; const start=m.index;
+    const tokens=val.split(/\s+/);
+    const first=tokens[0].toLowerCase();
+    if(STOP.has(first)) continue;            // começa com palavra comum
+    // início de frase + palavra única => provavelmente não é nome
+    if(tokens.length===1){
+      let i=start-1; while(i>=0 && /\s/.test(text[i])) i--;
+      const prev = i<0 ? "." : text[i];
+      if(".!?:;\n".includes(prev)) continue;
+    }
+    out.push({start, end:start+val.length, value:val});
+  }
+  return out;
+}
+
+/* ===================== detectores ===================== */
+// cada detector: id, label, group, prefix (rótulo), conf, prec (precedência), sensivel?, on (default), find(text)
+function rx(re, validate){
+  return text => {
+    const out=[];
+    for(const m of text.matchAll(re)){
+      if(validate && !validate(m[0])) continue;
+      out.push({start:m.index, end:m.index+m[0].length, value:m[0]});
+    }
+    return out;
+  };
+}
+const DETECTORS = [
+  // --- documentos ---
+  {id:"cpf",  label:"CPF (validado)",   group:"Documentos", prefix:"CPF",   conf:"alta", prec:100, on:true,
+   find: rx(/(?<!\d)\d{3}\.?\d{3}\.?\d{3}-?\d{2}(?!\d)/g, validCPF)},
+  {id:"cnpj", label:"CNPJ (validado)",  group:"Documentos", prefix:"CNPJ",  conf:"alta", prec:100, on:true,
+   find: rx(/(?<!\d)\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}(?!\d)/g, validCNPJ)},
+  {id:"cnj",  label:"Processo judicial (CNJ)", group:"Documentos", prefix:"PROCESSO", conf:"alta", prec:90, on:true,
+   find: rx(/\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}\b/g)},
+  {id:"cns",  label:"Cartão SUS (CNS)", group:"Documentos", prefix:"CNS", conf:"media", prec:70, on:false, sensivel:true,
+   find: rx(/(?<!\d)\d{3}\s?\d{4}\s?\d{4}\s?\d{4}(?!\d)/g)},
+  {id:"placa",label:"Placa de veículo", group:"Documentos", prefix:"PLACA", conf:"media", prec:70, on:true,
+   find: rx(/\b[A-Z]{3}-?\d[A-Z0-9]\d{2}\b/g)},
+  {id:"titulo",label:"Título de eleitor", group:"Documentos", prefix:"TITULO", conf:"baixa", prec:55, on:false,
+   find: rx(/(?<!\d)\d{4}\s\d{4}\s\d{4}(?!\d)/g)},
+  {id:"rg",   label:"RG (frouxo)",      group:"Documentos", prefix:"RG", conf:"baixa", prec:35, on:false,
+   find: rx(/(?<!\d)\d{1,2}\.?\d{3}\.?\d{3}-?[0-9Xx](?![\w])/g)},
+
+  // --- contato ---
+  {id:"email",label:"E-mail",           group:"Contato", prefix:"EMAIL", conf:"alta", prec:90, on:true,
+   find: rx(/[\w.+-]+@[\w-]+\.[\w.-]+/g)},
+  {id:"tel",  label:"Telefone / celular", group:"Contato", prefix:"TEL", conf:"media", prec:60, on:true,
+   find: rx(/(?<!\d)(?:\(?\d{2}\)?[\s.-]?)?(?:9[\s.-]?)?\d{4}[\s.-]?\d{4}(?!\d)/g)},
+  {id:"cep",  label:"CEP",              group:"Contato", prefix:"CEP", conf:"media", prec:65, on:true,
+   find: rx(/(?<!\d)\d{5}-?\d{3}(?!\d)/g)},
+  {id:"url",  label:"URL / site",       group:"Contato", prefix:"URL", conf:"alta", prec:90, on:true,
+   find: rx(/(?:https?:\/\/|www\.)[^\s,;]+/gi)},
+  {id:"handle",label:"@ rede social",   group:"Contato", prefix:"REDE", conf:"media", prec:40, on:false,
+   find: rx(/(?<![\w@])@[A-Za-z0-9_]{2,}\b/g)},
+  {id:"ip",   label:"Endereço IP",      group:"Contato", prefix:"IP", conf:"alta", prec:90, on:false,
+   find: rx(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g)},
+
+  // --- financeiro ---
+  {id:"cartao",label:"Cartão (Luhn)",   group:"Financeiro", prefix:"CARTAO", conf:"alta", prec:100, on:true, sensivel:true,
+   find: rx(/(?<!\d)(?:\d{4}[\s-]?){3}\d{4}(?!\d)/g, luhn)},
+  {id:"valor",label:"Valor em R$",      group:"Financeiro", prefix:"VALOR", conf:"baixa", prec:50, on:false,
+   find: rx(/R\$\s?\d{1,3}(?:\.\d{3})*(?:,\d{2})?/g)},
+
+  // --- localização (listas) ---
+  {id:"estado",label:"Estados (UF)",    group:"Localização", prefix:"ESTADO", conf:"media", prec:46, on:true,
+   find: rx(gazRegex(ESTADOS))},
+  {id:"cidade",label:"Capitais",        group:"Localização", prefix:"CIDADE", conf:"media", prec:45, on:true,
+   find: rx(gazRegex(CAPITAIS))},
+  {id:"pais", label:"Países",           group:"Localização", prefix:"PAIS", conf:"media", prec:44, on:true,
+   find: rx(gazRegex(PAISES))},
+
+  // --- pessoas / tempo ---
+  {id:"nome", label:"Nomes próprios (heurística)", group:"Pessoas", prefix:"PESSOA", conf:"baixa", prec:20, on:true,
+   find: findNames},
+  {id:"data", label:"Datas",            group:"Pessoas", prefix:"DATA", conf:"media", prec:50, on:true,
+   find: rx(/\b\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}\b|\b\d{1,2}\s+de\s+(?:janeiro|fevereiro|março|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s+de\s+\d{4}\b/gi)},
+  {id:"idade",label:"Idade (NN anos)",  group:"Pessoas", prefix:"IDADE", conf:"baixa", prec:48, on:false,
+   find: rx(/\b\d{1,3}\s+anos\b/gi)},
+];
+
+/* ===================== UI: categorias ===================== */
+function buildCategories(){
+  const groups={};
+  DETECTORS.forEach(d => (groups[d.group] ??= []).push(d));
+  const box=$("#categories");
+  for(const [g,list] of Object.entries(groups)){
+    const det=document.createElement("details");
+    det.className="grp"; det.open = (g==="Documentos"||g==="Pessoas");
+    const onCount=list.filter(d=>d.on).length;
+    det.innerHTML = `<summary>${g}<span class="sub">${onCount}/${list.length}</span></summary><div class="opts"></div>`;
+    const opts=det.querySelector(".opts");
+    list.forEach(d=>{
+      const l=document.createElement("label"); l.className="chk";
+      l.innerHTML=`<input type="checkbox" data-id="${d.id}" ${d.on?"checked":""}>
+        <span>${d.label}</span>
+        <span class="tag ${d.sensivel?"s":""}">${d.sensivel?"🔴 sensível":""} ${d.conf}</span>`;
+      l.querySelector("input").addEventListener("change",e=>{ d.on=e.target.checked; });
+      opts.appendChild(l);
+    });
+    box.appendChild(det);
+  }
+}
+
+/* ===================== detecção ===================== */
+let ENTITIES=[];   // entidades agrupadas, com .accepted
+let SRCTEXT="";
+
+function detect(){
+  SRCTEXT = $("#input").value;
+  if(!SRCTEXT.trim()){ alert("Cole um texto primeiro (ou clique Exemplo)."); return; }
+
+  // 1) coletar spans de todos os detectores ligados
+  let spans=[];
+  for(const d of DETECTORS){
+    if(!d.on) continue;
+    for(const s of d.find(SRCTEXT))
+      spans.push({...s, prefix:d.prefix, type:d.label, conf:d.conf, prec:d.prec, sensivel:!!d.sensivel});
+  }
+  // termos livres
+  spans.push(...findFreeTerms(SRCTEXT));
+
+  // 2) resolver sobreposição: precedência desc, depois comprimento desc
+  spans.sort((a,b)=> b.prec-a.prec || (b.end-b.start)-(a.end-a.start) || a.start-b.start);
+  const kept=[];
+  for(const s of spans){
+    if(!kept.some(k => s.start < k.end && k.start < s.end)) kept.push(s);
+  }
+
+  // 3) agrupar em entidades (numéricos: chave por dígitos; texto: por minúsculas)
+  const map=new Map();
+  for(const s of kept){
+    const numKey=/^(CPF|CNPJ|TEL|CEP|CARTAO|CNS|TITULO|RG|IP|PLACA|PROCESSO)$/.test(s.prefix);
+    const key = s.prefix+"::"+(numKey?onlyDigits(s.value):s.value.toLowerCase());
+    if(!map.has(key)) map.set(key,{prefix:s.prefix,type:s.type,conf:s.conf,sensivel:s.sensivel,value:s.value,spans:[]});
+    map.get(key).spans.push(s);
+  }
+  ENTITIES=[...map.values()].map(e=>{
+    e.spans.sort((a,b)=>a.start-b.start);
+    e.first=e.spans[0].start;
+    e.accepted = e.conf!=="baixa";   // alta/média aceitas por padrão; baixa = revisar
+    return e;
+  }).sort((a,b)=>a.first-b.first);
+
+  renderReview();
+  apply();
+}
+
+function findFreeTerms(text){
+  const raw=$("#freeterms").value.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
+  if(!raw.length) return [];
+  const word=$("#ft-word").checked, ci=$("#ft-ci").checked;
+  const out=[];
+  for(const term of raw){
+    const b = word ? "(?<![\\p{L}])(?:"+escRe(term)+")(?![\\p{L}])" : escRe(term);
+    let re; try{ re=new RegExp(b, ci?"giu":"gu"); }catch(_){ continue; }
+    for(const m of text.matchAll(re))
+      out.push({start:m.index,end:m.index+m[0].length,value:m[0],prefix:"TERMO",type:"termo livre",conf:"alta",prec:95,sensivel:false});
+  }
+  return out;
+}
+
+/* ===================== revisão (KWIC) ===================== */
+function kwic(text, start, end){
+  const W=42;
+  const a=escHtml(text.slice(Math.max(0,start-W),start)).replace(/\s+/g," ");
+  const m=escHtml(text.slice(start,end));
+  const z=escHtml(text.slice(end,end+W)).replace(/\s+/g," ");
+  return (start>W?"…":"")+a+"<mark>"+m+"</mark>"+z+(end+W<text.length?"…":"");
+}
+const CONFCOLOR={alta:"var(--c-alta)",media:"var(--c-media)",baixa:"var(--c-baixa)"};
+
+function renderReview(){
+  const box=$("#review");
+  if(!ENTITIES.length){ box.innerHTML='<div class="empty">Nenhum candidato encontrado com as categorias atuais.</div>'; updateStats(); return; }
+  box.innerHTML="";
+  ENTITIES.forEach((e,i)=>{
+    const it=document.createElement("div");
+    it.className="item"+(e.accepted?"":" off");
+    it.innerHTML=`
+      <input type="checkbox" data-i="${i}" ${e.accepted?"checked":""}>
+      <div class="kwic">${kwic(SRCTEXT,e.spans[0].start,e.spans[0].end)}</div>
+      <div class="meta">
+        <span class="cnt">${e.spans.length}×</span>
+        <span class="pill type">${e.prefix}</span>
+        ${e.sensivel?'<span class="pill" style="color:var(--warn);border-color:var(--warn)">🔴</span>':""}
+        <span class="dot" style="background:${CONFCOLOR[e.conf]}" title="confiança ${e.conf}"></span>
+      </div>`;
+    it.querySelector("input").addEventListener("change",ev=>{
+      e.accepted=ev.target.checked; it.classList.toggle("off",!e.accepted); updateStats(); apply();
+    });
+    box.appendChild(it);
+  });
+  updateStats();
+}
+function updateStats(){
+  const on=ENTITIES.filter(e=>e.accepted);
+  $("#s-total").textContent=ENTITIES.length;
+  $("#s-on").textContent=on.length;
+  $("#s-occ").textContent=on.reduce((a,e)=>a+e.spans.length,0);
+  $("#s-sens").textContent=on.filter(e=>e.sensivel).length;
+}
+
+/* ===================== aplicação / saída ===================== */
+let CODEBOOK=[];
+function apply(){
+  const mode=document.querySelector('input[name=mode]:checked').value;
+  const accepted=ENTITIES.filter(e=>e.accepted).slice().sort((a,b)=>a.first-b.first);
+
+  // numerar rótulos por tipo, consistente
+  const counter={}; CODEBOOK=[];
+  for(const e of accepted){
+    if(mode==="redact"){ e.label="[REMOVIDO]"; }
+    else { counter[e.prefix]=(counter[e.prefix]||0)+1; e.label="["+e.prefix+"_"+counter[e.prefix]+"]"; }
+    CODEBOOK.push({label:e.label, original:e.value, tipo:e.prefix, ocorrencias:e.spans.length});
+  }
+  // coletar spans aceitos, ordenar, reconstruir
+  const spans=[];
+  for(const e of accepted) for(const s of e.spans) spans.push({start:s.start,end:s.end,label:e.label});
+  spans.sort((a,b)=>a.start-b.start);
+  let out="",cur=0;
+  for(const s of spans){ if(s.start<cur) continue; out+=SRCTEXT.slice(cur,s.start)+s.label; cur=s.end; }
+  out+=SRCTEXT.slice(cur);
+  $("#output").value=out;
+}
+
+function download(name,text){
+  const blob=new Blob([text],{type:"text/plain;charset=utf-8"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob); a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+
+/* ===================== eventos ===================== */
+$("#input").addEventListener("input",()=>{ $("#charcount").textContent=$("#input").value.length+" caracteres"; });
+$("#file").addEventListener("change",e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const r=new FileReader(); r.onload=()=>{ $("#input").value=r.result; $("#input").dispatchEvent(new Event("input")); }; r.readAsText(f,"utf-8");
+});
+$("#detect").addEventListener("click",detect);
+$("#apply").addEventListener("click",apply);
+$("#copy").addEventListener("click",()=>{ const o=$("#output"); o.select(); try{document.execCommand("copy");}catch(_){ } navigator.clipboard?.writeText(o.value).catch(()=>{}); });
+$("#dl").addEventListener("click",()=>download("documento_anonimizado.txt",$("#output").value||""));
+$("#dl-key").addEventListener("click",()=>{
+  if(!CODEBOOK.length){ alert("Nada para exportar ainda."); return; }
+  if(!confirm("⚠️ O codebook REIDENTIFICA os dados. Baixe apenas se for guardá-lo em local seguro e separado. Continuar?")) return;
+  const csv="rotulo,original,tipo,ocorrencias\n"+CODEBOOK.map(r=>`"${r.label}","${(r.original+"").replace(/"/g,'""')}","${r.tipo}",${r.ocorrencias}`).join("\n");
+  download("codebook_REIDENTIFICA.csv",csv);
+});
+$("#sel-all").addEventListener("click",()=>{ ENTITIES.forEach(e=>e.accepted=true); renderReview(); apply(); });
+$("#sel-none").addEventListener("click",()=>{ ENTITIES.forEach(e=>e.accepted=false); renderReview(); apply(); });
+$("#sel-high").addEventListener("click",()=>{ ENTITIES.forEach(e=>e.accepted=e.conf==="alta"); renderReview(); apply(); });
+$("#sel-names").addEventListener("click",()=>{ ENTITIES.forEach(e=>{ if(e.prefix==="PESSOA") e.accepted=true; }); renderReview(); apply(); });
+document.querySelectorAll('input[name=mode]').forEach(r=>r.addEventListener("change",apply));
+
+$("#sample").addEventListener("click",()=>{
+  $("#input").value=
+`Entrevista realizada em 12/03/2021 com João da Silva, 42 anos, morador de Recife, Pernambuco.
+Ele relatou que trabalhou com Maria Oliveira na empresa Tecidos Brasil Ltda.
+Contato: joao.silva@email.com, telefone (81) 99876-5432.
+CPF informado: 529.982.247-25. O processo 0001234-56.2021.8.17.0001 corre na Bahia.
+Mencionou o Dr. Carlos Andrade e uma viagem a Portugal em 03/2020.`;
+  $("#input").dispatchEvent(new Event("input"));
+  $("#freeterms").value="Tecidos Brasil";
+  detect();
+});
+
+/* init */
+buildCategories();
+</script>
+</body>
+</html>
