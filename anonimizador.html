@@ -35,6 +35,7 @@
   header h1{font-size:16px;margin:0;font-weight:650}
   .badge{font-size:11px;padding:3px 9px;border-radius:999px;background:#10341f;color:var(--ok);border:1px solid #1e5e38;font-weight:600}
   .badge.net{background:#10341f}
+  .badge.exp{background:#3a1414;color:var(--bad);border-color:#7a2b2b}
   .sub{color:var(--mut);font-size:12px}
   main{display:grid;grid-template-columns:380px 1fr;gap:0;min-height:calc(100vh - 53px)}
   @media (max-width:880px){main{grid-template-columns:1fr}}
@@ -111,6 +112,7 @@
 <body>
 <header>
   <h1>🛡️ Anonimizador de Documentos</h1>
+  <span class="badge exp" title="Protótipo de pesquisa, fornecido sem garantia. Não garante anonimização: revise todo o resultado antes de usar.">⚠️ EXPERIMENTAL · sem garantia</span>
   <span class="badge net" id="netbadge">● offline · nada sai daqui</span>
   <span class="sub">v1 · arquivo único · sem instalador · NER opcional (BERTimbau)</span>
 </header>

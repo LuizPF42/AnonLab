@@ -1,14 +1,32 @@
-# AnonLab
+# AnonLab ⚠️ EXPERIMENTAL
 
-Anonimizador de documentos **offline (airgapped)** para pesquisa. É um único
-`anonimizador.html`: abre com duplo clique no navegador, não instala nada e não
-acessa a rede. A ferramenta sugere o que anonimizar, mostrando o trecho ao
-redor para revisão, e substitui por pseudônimos consistentes (`[PESSOA_1]`,
+> [!CAUTION]
+> ## ⚠️ SOFTWARE EXPERIMENTAL — SEM NENHUMA GARANTIA ⚠️
+>
+> **ESTE PROJETO É UM PROTÓTIPO DE PESQUISA, EM DESENVOLVIMENTO, FORNECIDO "COMO ESTÁ", SEM GARANTIA DE QUALQUER TIPO, EXPRESSA OU IMPLÍCITA.**
+>
+> - **ELE NÃO GARANTE ANONIMIZAÇÃO.** A ferramenta *sugere* o que remover e **ERRA**: pode deixar passar nomes, números, endereços e outros dados pessoais, e pode marcar o que não devia.
+> - **REVISE O RESULTADO INTEIRO, À MÃO, ANTES DE COMPARTILHAR, PUBLICAR OU ANALISAR QUALQUER DOCUMENTO.**
+> - Mesmo com os nomes trocados, combinações de detalhes (profissão rara + cidade pequena + data) podem **reidentificar** pessoas.
+> - Os modelos de linguagem são de terceiros, foram treinados em outros tipos de texto e erram de forma imprevisível no seu material.
+> - **Não é aconselhamento jurídico** e não substitui a avaliação do encarregado de dados (DPO) nem do comitê de ética da sua instituição.
+> - Os autores e colaboradores **não se responsabilizam** por vazamentos, danos ou qualquer consequência do uso. Veja a [licença (MIT)](LICENSE).
+
+Anonimizador de documentos para pesquisa que **roda inteiramente no
+navegador**: o texto que você cola **nunca sai do seu computador**. Ele não é
+enviado a nenhum servidor nem a nenhum modelo remoto; é o modelo que vem até o
+navegador. A ferramenta sugere o que anonimizar, mostrando o trecho ao redor
+para revisão, e substitui por pseudônimos consistentes (`[PESSOA_1]`,
 `[ENDERECO_2]`…). Quem decide o que sai é o pesquisador.
+
+**Testar online:** <https://luizpf42.github.io/AnonLab/anonimizador.html>
+(GitHub Pages). Também dá para baixar o `anonimizador.html` e abrir com duplo
+clique. As duas formas fazem a mesma coisa, mas a cópia local permite auditar e
+fixar exatamente o código que roda.
 
 ## Uso rápido
 
-1. Abra `anonimizador.html` (Chrome ou Edge recomendados; Firefox e Safari também funcionam).
+1. Abra o `anonimizador.html` (Chrome ou Edge recomendados; Firefox e Safari também funcionam).
 2. Cole o texto ou abra um `.txt`, ajuste as categorias e clique em **Detectar candidatos**.
 3. Revise a lista (aceitar/rejeitar), confira o resultado e **copie** ou **baixe**.
 
@@ -57,8 +75,13 @@ pós-processamento. Valem como teste de regressão, não como benchmark.
 
 ### Obter o pacote
 
-O pacote é gerado **uma vez**, numa máquina com internet, e copiado (pendrive,
-rede interna…) para a máquina airgapped:
+> Hoje o modelo vem de uma **pasta local** (o "pacote NER"). O próximo passo é
+> baixar os modelos direto do Hugging Face, no próprio navegador, sem precisar
+> montar o pacote. O texto continua sem sair da máquina. A pasta local seguirá
+> disponível para quem precisar trabalhar sem internet.
+
+O pacote é gerado **uma vez**, numa máquina com internet, e pode ser copiado
+(pendrive, rede interna…) para outras máquinas:
 
 ```bash
 uv run tools/build_ner_pack.py
@@ -84,13 +107,15 @@ Qualquer BERT de *token classification* do Hugging Face serve (`--model org/nome
 Cada variante ONNX é comparada com o modelo original e **descartada** se
 divergir além do limite (`MIN_ENTITY_F1` no script).
 
-### Por que continua airgapped
+### Privacidade: o texto não sai do navegador
 
-- A página tem uma **Content-Security-Policy** que proíbe qualquer acesso à
-  rede (`connect-src blob: data:`). O navegador bloqueia até o worker do modelo.
-- O transformers.js recebe um `fetch` próprio que só entrega arquivos do pacote
-  (qualquer outro endereço recebe 404 sem sair da máquina). Downloads remotos e
-  cache do navegador ficam desligados.
+- Todo o processamento (regras, listas e modelo) acontece **na sua máquina**.
+  Nenhum servidor recebe o documento.
+- A página tem uma **Content-Security-Policy** que restringe as conexões. Na
+  versão atual, com o pacote local, ela bloqueia *qualquer* acesso à rede
+  (`connect-src blob: data:`), inclusive no worker do modelo.
+- O transformers.js recebe um `fetch` próprio, que só entrega arquivos do
+  pacote. Qualquer outro endereço recebe 404 sem sair da máquina.
 - O runtime (JS e WASM) **só é executado se o SHA-256 bater** com os valores
   fixados no `anonimizador.html` (`NER_RUNTIME`). Os arquivos do modelo são
   conferidos contra o manifesto do pacote.
@@ -123,3 +148,31 @@ await harness.evalGolden()                                            // vazamen
 
 A especificação completa (princípios, camadas, categorias, roadmap) está em
 [`claude.md`](claude.md).
+
+## Créditos
+
+O AnonLab junta trabalho de muita gente. Os modelos, bibliotecas e dados
+abaixo pertencem aos seus autores e seguem as próprias licenças.
+
+**Modelos de linguagem (Hugging Face)**
+
+| modelo | autoria | licença | papel no AnonLab |
+|---|---|---|---|
+| [celiudos/legal-bert-lgpd](https://huggingface.co/celiudos/legal-bert-lgpd) | Marcelo Anselmo de Souza Filho. Dissertação *Inteligência Artificial no MPF: Uma Solução Baseada em IA para Pseudonimização de Dados Pessoais* (UnB, 2025) | MIT | modelo principal (dados pessoais da LGPD) |
+| [liaad/NER_harem_bert-base-portuguese-cased](https://huggingface.co/liaad/NER_harem_bert-base-portuguese-cased) | [LIAAD, INESC TEC](https://huggingface.co/liaad) | MIT | segundo modelo (organizações e locais) |
+| [pierreguillou/ner-bert-large-cased-pt-lenerbr](https://huggingface.co/pierreguillou/ner-bert-large-cased-pt-lenerbr) | Pierre Guillou | não declarada | base do legal-bert-lgpd; preset `lenerbr` |
+| [neuralmind/bert-base-portuguese-cased](https://huggingface.co/neuralmind/bert-base-portuguese-cased) e [neuralmind/bert-large-portuguese-cased](https://huggingface.co/neuralmind/bert-large-portuguese-cased) (BERTimbau) | Fábio Souza, Rodrigo Nogueira e Roberto Lotufo, NeuralMind ([portuguese-bert](https://github.com/neuralmind-ai/portuguese-bert)) | MIT | base de todos os modelos acima |
+| [rufimelo/Legal-BERTimbau-base](https://huggingface.co/rufimelo/Legal-BERTimbau-base) | Rui Melo | MIT | referência (ainda não usado: é um modelo de base, sem a parte de NER) |
+
+**Software**
+
+- [transformers.js](https://github.com/huggingface/transformers.js) (Hugging Face, Apache-2.0): carrega e roda os modelos no navegador.
+- [ONNX Runtime Web](https://github.com/microsoft/onnxruntime) (Microsoft, MIT): execução em WebGPU e WebAssembly.
+- Na conversão dos modelos (`tools/build_ner_pack.py`): [PyTorch](https://github.com/pytorch/pytorch), [🤗 Transformers](https://github.com/huggingface/transformers), [ONNX](https://github.com/onnx/onnx), [onnxconverter-common](https://github.com/microsoft/onnxconverter-common) e [huggingface_hub](https://github.com/huggingface/huggingface_hub).
+
+**Dados e referências**
+
+- [LeNER-Br](https://github.com/peluz/lener-br) (Luz de Araujo et al., PROPOR 2018): frases de teste usadas para validar as versões quantizadas dos modelos. Só no build; não são redistribuídas.
+- [HAREM](https://www.linguateca.pt/HAREM/) (Linguateca): corpus em que o modelo do LIAAD foi treinado.
+- [anonimizador-dp](https://github.com/anatelgovbr/anonimizador-dp) (Anatel, GPL-3.0): referência de detectores com validação (CNS, RG etc.). Nenhum código foi copiado.
+- Raquel Alexandra Moleira Domingos, *Aperfeiçoamento de Tecnologias de Anonimização para o Contexto de Dados Não Estruturados* (dissertação de mestrado, Faculdade de Ciências da Universidade de Lisboa, 2025). Comparação de modelos de NER para anonimização em português; inspirou o uso de modelos por domínio.
