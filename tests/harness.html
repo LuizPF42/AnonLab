@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>AnonLab — harness de teste</title>
+<!--
+  SÓ PARA TESTE (servido por http://localhost). Carrega o anonimizador.html num
+  iframe e injeta o pacote NER como objetos File — o mesmo que o seletor de
+  pasta entrega —, já que a CSP do anonimizador bloqueia fetch até do localhost.
+    const en = await harness.loadPack("/dist/anonlab-ner/", ["fp16"]);
+    await harness.app().openNerPack(en);
+-->
+<style>html,body{margin:0;height:100%}iframe{width:100%;height:100%;border:0}</style>
+</head>
+<body>
+<iframe id="app"></iframe>
+<script>document.getElementById("app").src = "../anonimizador.html?t=" + Date.now();</script>
+<script>
+async function getJSON(u){ const r = await fetch(u, { cache: "no-store" }); if(!r.ok) throw new Error(u+" "+r.status); return r.json(); }
+async function loadPack(base = "../dist/anonlab-ner/", dtypes = null){
+  const man = await getJSON(base + "anonlab-ner.json");
+  const paths = ["anonlab-ner.json", ...Object.keys(man.runtime.files).map(n => "runtime/" + n)];
+  for(const info of Object.values(man.models)){
+    const mm = await getJSON(base + info.path + "/anonlab-model.json");
+    paths.push(info.path + "/anonlab-model.json", ...Object.keys(mm.files).map(p => info.path + "/" + p));
+    for(const [d, v] of Object.entries(mm.variants)) if(!dtypes || dtypes.includes(d)) paths.push(info.path + "/" + v.file);
+  }
+  const entries = [];
+  for(const p of paths){
+    const r = await fetch(base + p, { cache: "no-store" }); if(!r.ok) throw new Error(p + " " + r.status);
+    entries.push({ path: "anonlab-ner/" + p, file: new File([await r.blob()], p.split("/").pop()) });
+  }
+  return entries;
+}
+// Vazamento: roda Detectar (aceitando só o que já vem aceito por padrão) em cada
+// documento de golden/docs.json e lista os dados pessoais que sobraram no resultado.
+async function evalGolden(){
+  const {docs} = await getJSON("golden/docs.json");
+  const w = document.getElementById("app").contentWindow, d = w.document;
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const found = (out, t) => new RegExp("(?<![\\p{L}\\p{N}])" + esc(t) + "(?![\\p{L}\\p{N}])", "u").test(out);
+  // vazamento parcial: sobrou um pedaço (sobrenome, número da rua, grupo de dígitos)
+  const STOP = new Set(["rua","avenida","travessa","alameda","jardim","vila","bairro","santa","são","colégio","estadual",
+                        "municipal","das","dos","da","de","do","e"]);
+  const parts = p => /^(PESSOA|ENDERECO)$/.test(p.tipo)
+    ? p.text.split(/[\s,]+/).filter(t => t.length >= 3 && !STOP.has(t.toLowerCase()))
+    : (/\d/.test(p.text) ? (p.text.match(/\d{3,}/g) || []) : []);
+  const res = [];
+  for(const doc of docs){
+    d.getElementById("input").value = doc.text;
+    d.getElementById("freeterms").value = "";
+    await w.AnonLab.detect();
+    const out = d.getElementById("output").value;
+    const leaks = doc.pii.filter(p => found(out, p.text));
+    const partial = doc.pii.filter(p => !leaks.includes(p) && parts(p).some(t => found(out, t)));
+    res.push({ id: doc.id, pii: doc.pii.length, vazou: leaks.length, parcial: partial.length,
+               vazamentos: leaks.map(p => p.tipo + ": " + p.text),
+               parciais: partial.map(p => p.tipo + ": " + p.text + " → sobrou " + parts(p).filter(t => found(out, t)).join(", ")),
+               excesso: doc.fp_ok.filter(t => !out.includes(t)),
+               aceitos: w.AnonLab.entities().filter(e => e.accepted).length, saida: out });
+  }
+  const tot = res.reduce((a, r) => ({ pii: a.pii + r.pii, vazou: a.vazou + r.vazou, parcial: a.parcial + r.parcial }), { pii: 0, vazou: 0, parcial: 0 });
+  return { recall: +(1 - tot.vazou / tot.pii).toFixed(3), recall_estrito: +(1 - (tot.vazou + tot.parcial) / tot.pii).toFixed(3), ...tot, docs: res };
+}
+
+window.harness = { loadPack, evalGolden, app: () => document.getElementById("app").contentWindow,
+                   doc: () => document.getElementById("app").contentDocument };
+</script>
+</body>
+</html>

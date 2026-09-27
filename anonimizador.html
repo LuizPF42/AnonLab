@@ -3,11 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  AIRGAP GARANTIDO PELO NAVEGADOR: esta política proíbe qualquer acesso à rede.
+  connect-src só aceita blob:/data: (dados que já estão na memória); não há
+  img/font/frame/form externos. Vale também para o worker do modelo NER, que
+  herda a política desta página.
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob: 'wasm-unsafe-eval'; worker-src blob:; connect-src blob: data:; style-src 'unsafe-inline'; img-src data: blob:; base-uri 'none'; form-action 'none'">
 <title>Anonimizador de Documentos — offline</title>
 <!--
   FERRAMENTA AIRGAPPED. Arquivo único, sem instalador, sem rede.
-  Auditoria: este arquivo NÃO contém nenhum http://, fetch, XMLHttpRequest
-  ou import externo. Tudo roda no seu navegador, em memória.
+  Auditoria: não há nenhum endereço de rede neste arquivo, nem XMLHttpRequest.
+  As únicas ocorrências de fetch/import servem arquivos LOCAIS (blob:) ao modelo
+  NER opcional, que vem de uma pasta escolhida por você; o runtime dele só é
+  executado se o SHA-256 bater com os valores fixados aqui (NER_RUNTIME).
+  A CSP acima faz o navegador bloquear qualquer outra tentativa.
   Abra com duplo clique. Nada é enviado para lugar nenhum.
 -->
 <style>
@@ -31,7 +41,8 @@
   .col{padding:16px;overflow:auto}
   .left{border-right:1px solid var(--line);background:var(--panel)}
   .card{background:var(--panel2);border:1px solid var(--line);border-radius:var(--radius);padding:12px;margin-bottom:14px}
-  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:0 0 10px}
+  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:0 0 10px;display:flex;justify-content:space-between;align-items:center}
+  .card.drop{outline:2px dashed var(--acc);outline-offset:2px}
   textarea{width:100%;background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:10px;font-family:var(--mono);font-size:13px;resize:vertical}
   #input{min-height:150px}
   #freeterms{min-height:54px}
@@ -39,10 +50,12 @@
   .row.between{justify-content:space-between}
   button{background:var(--acc2);color:#fff;border:1px solid var(--acc);border-radius:8px;padding:8px 12px;font-size:13px;cursor:pointer;font-weight:600}
   button:hover{background:var(--acc)}
+  button:disabled{opacity:.6;cursor:progress}
   button.ghost{background:transparent;color:var(--acc);border-color:var(--line)}
   button.ghost:hover{background:#0d2238;border-color:var(--acc)}
   button.sm{padding:4px 8px;font-size:12px;font-weight:500}
   button.big{width:100%;padding:11px;font-size:14px;margin-top:4px}
+  select{background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:4px 6px;font-size:12px}
   label.file{display:inline-block}
   input[type=file]{display:none}
   .grp{border:1px solid var(--line);border-radius:8px;margin-bottom:8px;overflow:hidden}
@@ -55,6 +68,14 @@
   .tag.s{color:var(--warn);font-weight:700}
   .opt-inline{display:flex;gap:14px;margin-top:6px}
   .opt-inline .chk{font-size:12px;color:var(--mut)}
+  /* NER */
+  .bar{height:6px;background:var(--bg);border:1px solid var(--line);border-radius:999px;overflow:hidden;margin-top:8px}
+  .bar>i{display:block;height:100%;width:0;background:var(--acc);transition:width .15s}
+  .ner-model{display:grid;grid-template-columns:18px 1fr;gap:6px;padding:7px 0 2px;border-top:1px dashed var(--line);margin-top:8px;font-size:12.5px}
+  .ner-model input{accent-color:var(--acc);width:15px;height:15px;margin-top:2px}
+  .ner-model b{font-weight:600}
+  .ner-model .m{color:var(--mut);font-size:11px}
+  #ner-status{margin:6px 0 0}
   /* review */
   .stats{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
   .stat{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 11px;min-width:78px}
@@ -66,16 +87,20 @@
   .item{display:grid;grid-template-columns:22px 1fr auto;gap:10px;align-items:center;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
   .item.off{opacity:.45}
   .item input[type=checkbox]{width:16px;height:16px;accent-color:var(--ok)}
-  .kwic{font-family:var(--mono);font-size:12.5px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .kwic{font-family:var(--mono);font-size:12.5px;color:var(--mut);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word}
   .kwic mark{background:#3a2f12;color:var(--hi);padding:0 2px;border-radius:3px}
   .meta{display:flex;gap:8px;align-items:center;white-space:nowrap}
   .pill{font-size:10px;padding:2px 7px;border-radius:999px;border:1px solid var(--line);color:var(--mut)}
   .pill.type{color:var(--acc);border-color:var(--acc2)}
+  .pill.ner{color:#c9a8ff;border-color:#5b4a86}
+  .pill.ok{color:var(--ok);border-color:#1e5e38}
+  .pill.bad{color:var(--bad);border-color:var(--bad)}
   .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
   .cnt{font-size:11px;color:var(--mut)}
   .empty{color:var(--mut);text-align:center;padding:30px;font-size:13px}
   .out-head{display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px}
   #output{min-height:160px;background:var(--bg)}
+  #run-info{margin:-4px 0 10px}
   .note{font-size:11.5px;color:var(--mut);margin-top:6px}
   .note.warn{color:var(--warn)}
   details.help summary{cursor:pointer;color:var(--acc);font-size:12px}
@@ -87,7 +112,7 @@
 <header>
   <h1>🛡️ Anonimizador de Documentos</h1>
   <span class="badge net" id="netbadge">● offline · nada sai daqui</span>
-  <span class="sub">protótipo v0 · arquivo único · sem instalador</span>
+  <span class="sub">v1 · arquivo único · sem instalador · NER opcional (BERTimbau)</span>
 </header>
 
 <main>
@@ -114,21 +139,43 @@
       </div>
     </div>
 
+    <div class="card" id="ner-card">
+      <h2>3 · Modelo de linguagem (NER) <span class="pill" id="ner-badge">opcional</span></h2>
+      <div class="row between">
+        <label class="file"><input type="file" id="ner-dir" webkitdirectory multiple><button class="ghost sm" id="ner-open">📦 Carregar pacote NER…</button></label>
+        <label class="sub">rodar na
+          <select id="ner-device" title="Onde o modelo roda. Automático usa a GPU (WebGPU) quando disponível.">
+            <option value="auto">automático</option>
+            <option value="webgpu">GPU (WebGPU)</option>
+            <option value="wasm">CPU (WASM)</option>
+          </select>
+        </label>
+      </div>
+      <p class="note" id="ner-status">Opcional. Com o pacote NER (BERTimbau), a detecção entende o contexto e acha nomes, endereços e outros dados que as regras não pegam. Selecione a pasta <code>anonlab-ner</code> ou arraste-a para cá.</p>
+      <div class="bar" id="ner-bar" hidden><i></i></div>
+      <div id="ner-models"></div>
+      <details class="help">
+        <summary>Onde consigo o pacote? É seguro?</summary>
+        <p class="note">O pacote é uma pasta gerada uma vez, numa máquina com internet, por <code>tools/build_ner_pack.py</code> (veja o README), e copiada para cá. Contém o modelo convertido para ONNX e o runtime (transformers.js + onnxruntime-web). Tudo roda neste computador: GPU via WebGPU ou CPU via WebAssembly. O runtime só é executado se o SHA-256 conferir com o fixado neste arquivo, e a política de segurança da página bloqueia qualquer acesso à rede.</p>
+      </details>
+    </div>
+
     <div class="card">
-      <h2>3 · Categorias (caixinhas)</h2>
+      <h2>4 · Categorias (caixinhas)</h2>
       <div id="categories"></div>
     </div>
 
     <div class="card">
-      <h2>4 · Substituição</h2>
+      <h2>5 · Substituição</h2>
       <label class="chk"><input type="radio" name="mode" value="tag" checked> Rótulo por tipo — <code>[PESSOA_1]</code></label>
       <label class="chk"><input type="radio" name="mode" value="redact"> Tarja — <code>[REMOVIDO]</code></label>
       <button class="big" id="detect">🔎 Detectar candidatos</button>
+      <div class="row" style="justify-content:center"><button class="ghost sm" id="cancel" hidden>Cancelar</button></div>
     </div>
 
     <details class="help">
       <summary>Como funciona / privacidade</summary>
-      <p class="note">Quatro camadas: <b>padrões</b> (CPF, e-mail, telefone… com validação de dígito), <b>listas</b> (estados, capitais, países), <b>heurística de nomes</b> (sugestões para você revisar) e seus <b>termos livres</b>. A ferramenta <b>sugere</b>; você decide. Roda 100% no navegador, offline. Veja <code>claude.md</code> para o design completo.</p>
+      <p class="note">Cinco camadas: <b>padrões</b> (CPF, e-mail, telefone… com validação de dígito), <b>modelo de linguagem</b> (NER BERTimbau, opcional), <b>listas</b> (estados, capitais, países), <b>heurística de nomes</b> e seus <b>termos livres</b>. O que o modelo acha é procurado no resto do texto, para nenhuma ocorrência escapar. A ferramenta <b>sugere</b>; você decide. Roda 100% no navegador, offline. Veja <code>claude.md</code> para o design completo.</p>
     </details>
   </section>
 
@@ -138,8 +185,10 @@
       <div class="stat"><b id="s-total">0</b><span>candidatos</span></div>
       <div class="stat"><b id="s-on">0</b><span>aceitos</span></div>
       <div class="stat"><b id="s-occ">0</b><span>ocorrências</span></div>
+      <div class="stat"><b id="s-ner" style="color:#c9a8ff">0</b><span>via modelo</span></div>
       <div class="stat"><b id="s-sens" style="color:var(--warn)">0</b><span>sensíveis 🔴</span></div>
     </div>
+    <p class="note" id="run-info"></p>
 
     <div class="toolbar">
       <button class="ghost sm" id="sel-all">Aceitar todos</button>
@@ -172,6 +221,344 @@
   </section>
 </main>
 
+<script id="ner-core">
+/* ===================== ner-core =====================
+   Tokenizador BERT (WordPiece) com offsets + janelas + agregação "first".
+   JS puro, sem dependências; roda na página e no worker do modelo.
+   Espelha o HuggingFace tokenizers (BertNormalizer → BertPreTokenizer →
+   WordPiece) e o pipeline de NER do transformers (aggregation "first").
+   Validado contra vetores gerados em Python: tests/test_ner_core.mjs. */
+const NerCore = (() => {
+  "use strict";
+  const RE_OTHER = /\p{C}/u;            // Cc Cf Cn Co Cs: "controle" p/ o BERT
+  const RE_WS = /\p{White_Space}/u;
+  const RE_PUNCT = /\p{P}/u;
+  const RE_MN = /\p{Mn}/u;
+  const isAsciiPunct = cp => (cp >= 33 && cp <= 47) || (cp >= 58 && cp <= 64) || (cp >= 91 && cp <= 96) || (cp >= 123 && cp <= 126);
+  const isChinese = cp =>
+    (cp >= 0x4E00 && cp <= 0x9FFF) || (cp >= 0x3400 && cp <= 0x4DBF) || (cp >= 0x20000 && cp <= 0x2A6DF) ||
+    (cp >= 0x2A700 && cp <= 0x2B73F) || (cp >= 0x2B740 && cp <= 0x2B81F) || (cp >= 0x2B920 && cp <= 0x2CEAF) ||
+    (cp >= 0xF900 && cp <= 0xFAFF) || (cp >= 0x2F800 && cp <= 0x2FA1F);
+  const isTNR = ch => ch === "\t" || ch === "\n" || ch === "\r";
+  const isWS = ch => isTNR(ch) || RE_WS.test(ch);
+  const isControl = ch => !isTNR(ch) && RE_OTHER.test(ch);
+  const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  /** Cria o tokenizador a partir do tokenizer.json (formato HF tokenizers). */
+  function createTokenizer(tj) {
+    const norm = tj.normalizer || {}, pre = tj.pre_tokenizer || {}, model = tj.model || {};
+    if (norm.type !== "BertNormalizer" || pre.type !== "BertPreTokenizer" || model.type !== "WordPiece")
+      throw new Error("tokenizador não suportado (esperado BERT WordPiece)");
+    const vocab = new Map(Object.entries(model.vocab));
+    const lower = !!norm.lowercase;
+    const strip = norm.strip_accents ?? lower;
+    const clean = norm.clean_text !== false;
+    const chinese = norm.handle_chinese_chars !== false;
+    const prefix = model.continuing_subword_prefix ?? "##";
+    const maxChars = model.max_input_chars_per_word ?? 100;
+    const unkId = vocab.get(model.unk_token ?? "[UNK]");
+    const special = tj.post_processor?.special_tokens || {};
+    const clsId = special["[CLS]"]?.ids?.[0] ?? vocab.get("[CLS]");
+    const sepId = special["[SEP]"]?.ids?.[0] ?? vocab.get("[SEP]");
+    const padId = vocab.get("[PAD]") ?? 0;
+    // tokens adicionados (ex.: [SEP] literal no texto) são casados no texto cru, como no HF
+    const added = (tj.added_tokens || []).filter(t => t.content);
+    const addedId = new Map(added.map(t => [t.content, t.id]));
+    const addedRe = added.length
+      ? new RegExp([...addedId.keys()].sort((a, b) => b.length - a.length).map(escRe).join("|"), "g")
+      : null;
+
+    // normaliza text[from,to) caractere a caractere, guardando o offset original de cada um
+    function normalize(text, from, to, ch, st, en) {
+      for (let i = from; i < to;) {
+        const cp = text.codePointAt(i), len = cp > 0xFFFF ? 2 : 1, c = text.slice(i, i + len);
+        const s = i, e = i + len;
+        i = e;
+        if (clean) {
+          if (cp === 0 || cp === 0xFFFD || isControl(c)) continue;
+          if (isWS(c)) { ch.push(" "); st.push(s); en.push(e); continue; }
+        }
+        if (chinese && isChinese(cp)) {
+          ch.push(" ", c, " "); st.push(s, s, s); en.push(e, e, e);
+          continue;
+        }
+        let pieces = strip ? [...c.normalize("NFD")].filter(x => !RE_MN.test(x)) : [c];
+        for (let p of pieces) {
+          if (lower) p = p.toLowerCase();
+          for (const q of p) { ch.push(q); st.push(s); en.push(e); }
+        }
+      }
+    }
+
+    function wordpiece(ch, st, en, a, b, out) {
+      if (b - a > maxChars) { out.push(unkId, st[a], en[b - 1]); return; }
+      const mark = out.length;
+      for (let s = a; s < b;) {
+        let e = b, id;
+        for (; s < e; e--) {
+          let sub = ch.slice(s, e).join("");
+          if (s > a) sub = prefix + sub;
+          id = vocab.get(sub);
+          if (id !== undefined) break;
+        }
+        if (s === e) { out.length = mark; out.push(unkId, st[a], en[b - 1]); return; }
+        out.push(id, st[s], en[e - 1]);
+        s = e;
+      }
+    }
+
+    // texto → palavras (espaço separa; pontuação vira palavra própria) → WordPiece
+    function encodeSegment(text, from, to, toks, words) {
+      const ch = [], st = [], en = [];
+      normalize(text, from, to, ch, st, en);
+      let w0 = -1;
+      const flush = end => {
+        if (w0 < 0) return;
+        const out = [];
+        wordpiece(ch, st, en, w0, end, out);
+        const wid = words.n++;
+        for (let k = 0; k < out.length; k += 3) toks.push(out[k], out[k + 1], out[k + 2], wid);
+        w0 = -1;
+      };
+      for (let k = 0; k < ch.length; k++) {
+        const c = ch[k];
+        if (isWS(c)) { flush(k); continue; }
+        const cp = c.codePointAt(0);
+        if (isAsciiPunct(cp) || RE_PUNCT.test(c)) { flush(k); w0 = k; flush(k + 1); continue; }
+        if (w0 < 0) w0 = k;
+      }
+      flush(ch.length);
+    }
+
+    /** Tokeniza sem [CLS]/[SEP]. Offsets em unidades UTF-16 do texto original. */
+    function encode(text) {
+      const toks = [], words = { n: 0 };
+      let pos = 0;
+      if (addedRe) {
+        addedRe.lastIndex = 0;
+        for (const m of text.matchAll(addedRe)) {
+          encodeSegment(text, pos, m.index, toks, words);
+          toks.push(addedId.get(m[0]), m.index, m.index + m[0].length, words.n++);
+          pos = m.index + m[0].length;
+        }
+      }
+      encodeSegment(text, pos, text.length, toks, words);
+      const n = toks.length / 4;
+      const ids = new Int32Array(n), start = new Int32Array(n), end = new Int32Array(n), word = new Int32Array(n);
+      for (let i = 0; i < n; i++) {
+        ids[i] = toks[4 * i]; start[i] = toks[4 * i + 1]; end[i] = toks[4 * i + 2]; word[i] = toks[4 * i + 3];
+      }
+      return { ids, start, end, word, length: n };
+    }
+
+    return { encode, clsId, sepId, padId, unkId, vocabSize: vocab.size };
+  }
+
+  /** Janelas [ini, fim) sobre os tokens de conteúdo (sem [CLS]/[SEP]), com sobreposição. */
+  function windowsFor(n, maxLen = 512, stride = 128) {
+    const span = maxLen - 2;
+    if (n <= span) return [[0, n]];
+    const step = span - stride, out = [];
+    for (let s = 0; ; s += step) {
+      const e = Math.min(s + span, n);
+      out.push([s, e]);
+      if (e === n) return out;
+    }
+  }
+
+  /** Janela em que o token i está mais ao centro (mais contexto dos dois lados). */
+  function bestWindow(i, wins) {
+    let best = 0, ctx = -1;
+    for (let w = 0; w < wins.length; w++) {
+      const [s, e] = wins[w];
+      if (i < s || i >= e) continue;
+      const c = Math.min(i - s, e - 1 - i);
+      if (c > ctx) { best = w; ctx = c; }
+    }
+    return best;
+  }
+
+  /** bestWindow para todos os tokens de uma vez, em O(n). */
+  function assignWindows(n, wins) {
+    const best = new Int32Array(n), ctx = new Int32Array(n).fill(-1);
+    wins.forEach(([s, e], w) => {
+      for (let i = s; i < e; i++) {
+        const c = Math.min(i - s, e - 1 - i);
+        if (c > ctx[i]) { ctx[i] = c; best[i] = w; }
+      }
+    });
+    return best;
+  }
+
+  const splitTag = label =>
+    label.length > 2 && label[1] === "-" && "BIES".includes(label[0]) ? [label[0], label.slice(2)] : ["I", label];
+
+  /** Estratégia "first" do HF: a palavra herda o rótulo do 1º sub-token; agrupa por BIO. */
+  function aggregateFirst(enc, labels, scores, id2label) {
+    const out = [];
+    let cur = null;
+    const close = () => {
+      if (cur && cur.tag !== "O")
+        out.push({ label: cur.tag, start: cur.start, end: cur.end, score: cur.sum / cur.n });
+      cur = null;
+    };
+    for (let i = 0; i < enc.length;) {
+      let j = i;
+      while (j + 1 < enc.length && enc.word[j + 1] === enc.word[i]) j++;
+      const [bi, tag] = splitTag(id2label[labels[i]]);
+      const score = scores[i];
+      if (cur && tag === cur.tag && bi !== "B") { cur.end = enc.end[j]; cur.sum += score; cur.n++; }
+      else { close(); cur = { tag, start: enc.start[i], end: enc.end[j], sum: score, n: 1 }; }
+      i = j + 1;
+    }
+    close();
+    return out;
+  }
+
+  return { createTokenizer, windowsFor, bestWindow, assignWindows, aggregateFirst, splitTag };
+})();
+</script>
+
+<script type="text/js-worker" id="ner-worker">
+/* ===================== worker do modelo NER =====================
+   Recebe os arquivos do pacote (objetos File), confere o SHA-256 de tudo,
+   importa o transformers.js a partir de um blob: e roda o modelo (WebGPU ou
+   WASM). Rede: nenhuma. env.fetch só entrega arquivos do pacote (qualquer outro
+   endereço recebe 404 sem sair daqui) e a CSP herdada bloqueia o resto. */
+let T = null;                   // módulo transformers.js
+const VFS = new Map();          // "slug/arquivo" -> File
+const MODELS = new Map();       // slug -> modelo carregado
+const CANCEL = new Set();
+const post = m => self.postMessage(m);
+
+async function sha256(buf) {
+  const d = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(d), b => b.toString(16).padStart(2, "0")).join("");
+}
+async function verified(file, sha, what) {
+  const buf = await file.arrayBuffer();
+  const got = await sha256(buf);
+  if (got !== sha) throw new Error(`${what}: SHA-256 não confere (arquivo alterado ou corrompido)`);
+  return buf;
+}
+// "/models/<slug>/onnx/x.onnx" → "<slug>/onnx/x.onnx"
+async function packFetch(input) {
+  const url = String(typeof input === "string" ? input : input?.url ?? input);
+  const f = VFS.get(decodeURIComponent(url.replace(/^.*?\/models\//, "")));
+  if (!f) return new Response(null, { status: 404, statusText: "fora do pacote" });
+  return new Response(f, { status: 200, headers: { "content-length": String(f.size) } });
+}
+
+async function init({ id, runtime, trusted }) {
+  const bufs = {};
+  for (const [name, file] of Object.entries(runtime)) bufs[name] = await verified(file, trusted[name], name);
+  const blob = (buf, type) => URL.createObjectURL(new Blob([buf], { type }));
+  T = await import(blob(bufs["transformers.min.js"], "text/javascript"));
+  const env = T.env;
+  Object.assign(env, {
+    allowRemoteModels: false, allowLocalModels: true, localModelPath: "/models/",
+    useBrowserCache: false, useFSCache: false, useCustomCache: false, useWasmCache: false,
+    fetch: packFetch,
+  });
+  env.logLevel = 40; // só erros
+  const wasm = env.backends.onnx.wasm;
+  wasm.wasmBinary = bufs["ort-wasm-simd-threaded.asyncify.wasm"];
+  wasm.wasmPaths = { mjs: blob(bufs["ort-wasm-simd-threaded.asyncify.mjs"], "text/javascript") };
+  wasm.numThreads = 1;          // sem SharedArrayBuffer fora de páginas isoladas
+  wasm.proxy = false;
+  post({ id, type: "done", result: { version: env.version } });
+}
+
+async function load({ id, slug, files, device, dtype, meta }) {
+  for (const [path, { file, sha256: sha }] of Object.entries(files)) {
+    post({ id, type: "progress", stage: "verify", file: path });
+    await verified(file, sha, path);          // integridade (o conteúdo é lido de novo abaixo)
+    VFS.set(`${slug}/${path}`, file);
+  }
+  const tok = NerCore.createTokenizer(JSON.parse(await files["tokenizer.json"].file.text()));
+  const t0 = performance.now();
+  const model = await T.AutoModelForTokenClassification.from_pretrained(slug, {
+    device, dtype,
+    progress_callback: p => { if (p.status === "progress_total" || p.status === "progress") post({ id, type: "progress", stage: "load", ...p }); },
+  });
+  for (const path of Object.keys(files)) VFS.delete(`${slug}/${path}`);
+  const M = { model, tok, device, dtype, id2label: meta.id2label, C: Object.keys(meta.id2label).length,
+              maxLength: meta.max_length ?? 512, stride: meta.stride ?? 128, batch: device === "webgpu" ? 4 : 1 };
+  MODELS.set(slug, M);
+  const t1 = performance.now();
+  await infer(M, [[tok.clsId, tok.sepId]], 64);  // aquecimento (compila shaders na GPU)
+  post({ id, type: "done", result: { loadMs: t1 - t0, warmMs: performance.now() - t1 } });
+}
+
+// roda um lote de linhas [CLS] … [SEP], preenchidas até L; devolve logits [B, L, C]
+async function infer(M, rows, L) {
+  const B = rows.length, n = B * L;
+  const ids = new BigInt64Array(n).fill(BigInt(M.tok.padId)), mask = new BigInt64Array(n), tt = new BigInt64Array(n);
+  rows.forEach((r, b) => { for (let j = 0; j < r.length; j++) { ids[b * L + j] = BigInt(r[j]); mask[b * L + j] = 1n; } });
+  const out = await M.model({
+    input_ids: new T.Tensor("int64", ids, [B, L]),
+    attention_mask: new T.Tensor("int64", mask, [B, L]),
+    token_type_ids: new T.Tensor("int64", tt, [B, L]),
+  });
+  return out.logits.data;
+}
+
+async function run({ id, text, slugs }) {
+  const result = {}, t0 = performance.now();
+  let windows = 0;
+  for (const slug of slugs) {
+    const M = MODELS.get(slug);
+    if (!M) throw new Error(`modelo não carregado: ${slug}`);
+    const enc = M.tok.encode(text), n = enc.length, C = M.C;
+    const wins = NerCore.windowsFor(n, M.maxLength, M.stride);
+    const longest = Math.max(...wins.map(([s, e]) => e - s));
+    const gran = M.device === "webgpu" ? 64 : 8;                            // GPU: poucas formas (menos compilação)
+    const L = Math.min(M.maxLength, Math.ceil((longest + 2) / gran) * gran);
+    const lab = new Int32Array(n), sc = new Float32Array(n), who = NerCore.assignWindows(n, wins);
+    for (let w0 = 0; w0 < wins.length; w0 += M.batch) {
+      if (CANCEL.has(id)) throw Object.assign(new Error("cancelado"), { name: "AbortError" });
+      const chunk = wins.slice(w0, w0 + M.batch);
+      const rows = chunk.map(([s, e]) => [M.tok.clsId, ...enc.ids.subarray(s, e), M.tok.sepId]);
+      while (rows.length < M.batch && wins.length > 1) rows.push([M.tok.clsId, M.tok.sepId]);
+      const data = await infer(M, rows, L);
+      chunk.forEach(([s, e], k) => {
+        for (let i = s; i < e; i++) {
+          if (who[i] !== w0 + k) continue;       // outra janela vê este token mais ao centro
+          const base = (k * L + (i - s) + 1) * C;
+          let best = 0, mx = -Infinity, sum = 0;
+          for (let c = 0; c < C; c++) if (data[base + c] > mx) { mx = data[base + c]; best = c; }
+          for (let c = 0; c < C; c++) sum += Math.exp(data[base + c] - mx);
+          lab[i] = best; sc[i] = 1 / sum;
+        }
+      });
+      windows += chunk.length;
+      post({ id, type: "progress", stage: "infer", slug, done: Math.min(w0 + M.batch, wins.length), total: wins.length });
+    }
+    result[slug] = NerCore.aggregateFirst(enc, lab, sc, M.id2label);
+  }
+  post({ id, type: "done", result: { entities: result, ms: performance.now() - t0, windows } });
+}
+
+self.onmessage = async ({ data: m }) => {
+  if (m.type === "cancel") { CANCEL.add(m.target); return; }
+  try {
+    if (m.type === "init") await init(m);
+    else if (m.type === "load") await load(m);
+    else if (m.type === "run") await run(m);
+    else if (m.type === "unload") {
+      const M = MODELS.get(m.slug);
+      MODELS.delete(m.slug);
+      await M?.model?.dispose?.();
+      post({ id: m.id, type: "done" });
+    }
+  } catch (e) {
+    post({ id: m.id, type: "error", name: e?.name, message: String(e?.message ?? e) });
+  } finally {
+    CANCEL.delete(m.id);
+  }
+};
+</script>
+
 <script>
 "use strict";
 
@@ -180,6 +567,9 @@ const $ = s => document.querySelector(s);
 const onlyDigits = s => s.replace(/\D/g,"");
 const escHtml = s => s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+const normKey = s => s.toLowerCase().replace(/\s+/g," ").trim();
+const fmtMB = n => (n/1048576).toFixed(0)+" MB";
+const fmtS = ms => (ms/1000).toLocaleString("pt-BR",{maximumFractionDigits:1})+" s";
 
 /* ---- validadores (cortam falso-positivo) ---- */
 function validCPF(s){
@@ -202,6 +592,19 @@ function luhn(s){
   for(let i=c.length-1;i>=0;i--){ let n=+c[i]; if(alt){ n*=2; if(n>9)n-=9; } sum+=n; alt=!alt; }
   return sum%10===0;
 }
+// Cartão Nacional de Saúde: definitivo (1/2: PIS + DV mod 11) ou provisório (7/8/9: soma ponderada mod 11)
+function validCNS(s){
+  const c=onlyDigits(s);
+  if(c.length!==15) return false;
+  const w=n=>{ let sum=0; for(let i=0;i<n;i++) sum+=+c[i]*(15-i); return sum; };
+  if(/^[12]/.test(c)){
+    let sum=w(11), dv=11-sum%11, mid="000";
+    if(dv===11) dv=0;
+    if(dv===10){ sum+=2; dv=11-sum%11; mid="001"; }
+    return c===c.slice(0,11)+mid+dv;
+  }
+  return /^[789]/.test(c) && w(15)%11===0;
+}
 
 /* ===================== gazetteers ===================== */
 const ESTADOS = ["Acre","Alagoas","Amapá","Amazonas","Bahia","Ceará","Distrito Federal","Espírito Santo","Goiás","Maranhão","Mato Grosso do Sul","Mato Grosso","Minas Gerais","Pará","Paraíba","Paraná","Pernambuco","Piauí","Rio Grande do Norte","Rio Grande do Sul","Rio de Janeiro","Rondônia","Roraima","Santa Catarina","São Paulo","Sergipe","Tocantins"];
@@ -215,8 +618,11 @@ function gazRegex(list){
 }
 
 /* ===================== heurística de nomes ===================== */
-const STOP = new Set(["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro","segunda","terça","quarta","quinta","sexta","sábado","domingo","a","o","as","os","um","uma","ele","ela","eles","elas","eu","nós","você","vocês","este","esta","esse","essa","isso","isto","aquele","aquela","quando","onde","como","porque","por","para","mas","então","também","sim","não","sr","sra","srta","dr","dra","senhor","senhora","entrevista","entrevistado","entrevistador","pesquisa","pesquisador","obs","nota","após","antes","durante","segundo","conforme","embora","apesar","portanto","além","ainda","já","hoje","ontem","amanhã"]);
-const NAME_RE = /(?<![\p{L}])(\p{Lu}[\p{Ll}'-]+(?:\s+(?:d[aeo]s?\s+)?\p{Lu}[\p{Ll}'-]+)*)/gu;
+const STOP = new Set(["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro","segunda","terça","quarta","quinta","sexta","sábado","domingo","a","o","as","os","um","uma","ele","ela","eles","elas","eu","nós","você","vocês","este","esta","esse","essa","isso","isto","aquele","aquela","quando","onde","como","porque","por","para","mas","então","também","sim","não","sr","sra","srta","dr","dra","senhor","senhora","entrevista","entrevistado","entrevistador","pesquisa","pesquisador","obs","nota","após","antes","durante","segundo","conforme","embora","apesar","portanto","além","ainda","já","hoje","ontem","amanhã",
+  "rua","avenida","travessa","alameda","praça","estrada","rodovia","largo","jardim","vila","parque","bairro","conjunto","residencial"]);
+// partes do nome separadas por UM espaço (não atravessa quebra de linha nem colunas "   ")
+const NAME_RE = /(?<![\p{L}])(\p{Lu}[\p{Ll}'-]+(?:[ \t](?:d[aeo]s?[ \t])?\p{Lu}[\p{Ll}'-]+)*)/gu;
+const NAME_EXT_RE = /^[ \t]?(?:(?:d[aeo]s?|e)[ \t])?\p{Lu}[\p{Ll}'-]+(?:[ \t](?:d[aeo]s?[ \t])?\p{Lu}[\p{Ll}'-]+)*[ \t]?$/u;
 
 function findNames(text){
   const out=[];
@@ -237,7 +643,7 @@ function findNames(text){
 }
 
 /* ===================== detectores ===================== */
-// cada detector: id, label, group, prefix (rótulo), conf, prec (precedência), sensivel?, on (default), find(text)
+// cada detector: id, label, group, prefix (rótulo), conf, prec (precedência), src (camada), sensivel?, on (default), find(text)
 function rx(re, validate){
   return text => {
     const out=[];
@@ -250,66 +656,208 @@ function rx(re, validate){
 }
 const DETECTORS = [
   // --- documentos ---
-  {id:"cpf",  label:"CPF (validado)",   group:"Documentos", prefix:"CPF",   conf:"alta", prec:100, on:true,
+  {id:"cpf",  label:"CPF (validado)",   group:"Documentos", prefix:"CPF",   conf:"alta", prec:100, src:"padrão", on:true,
    find: rx(/(?<!\d)\d{3}\.?\d{3}\.?\d{3}-?\d{2}(?!\d)/g, validCPF)},
-  {id:"cnpj", label:"CNPJ (validado)",  group:"Documentos", prefix:"CNPJ",  conf:"alta", prec:100, on:true,
+  {id:"cnpj", label:"CNPJ (validado)",  group:"Documentos", prefix:"CNPJ",  conf:"alta", prec:100, src:"padrão", on:true,
    find: rx(/(?<!\d)\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}(?!\d)/g, validCNPJ)},
-  {id:"cnj",  label:"Processo judicial (CNJ)", group:"Documentos", prefix:"PROCESSO", conf:"alta", prec:90, on:true,
+  {id:"cnj",  label:"Processo judicial (CNJ)", group:"Documentos", prefix:"PROCESSO", conf:"alta", prec:90, src:"padrão", on:true,
    find: rx(/\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}\b/g)},
-  {id:"cns",  label:"Cartão SUS (CNS)", group:"Documentos", prefix:"CNS", conf:"media", prec:70, on:false, sensivel:true,
-   find: rx(/(?<!\d)\d{3}\s?\d{4}\s?\d{4}\s?\d{4}(?!\d)/g)},
-  {id:"placa",label:"Placa de veículo", group:"Documentos", prefix:"PLACA", conf:"media", prec:70, on:true,
+  {id:"cns",  label:"Cartão SUS (CNS, validado)", group:"Documentos", prefix:"CNS", conf:"alta", prec:100, src:"padrão", on:true, sensivel:true,
+   find: rx(/(?<!\d)\d{3}\s?\d{4}\s?\d{4}\s?\d{4}(?!\d)/g, validCNS)},
+  // mesmo formato, dígito inválido (erro de digitação?): ainda é dado de saúde; e evita
+  // que o telefone "morda" o meio do número ("706 [TEL] 1234")
+  {id:"cnsfmt",label:"Formato de CNS (dígito não confere)", group:"Documentos", prefix:"CNS", conf:"media", prec:61, src:"padrão", on:true, sensivel:true,
+   find: rx(/(?<!\d)\d{3}[\s.]\d{4}[\s.]\d{4}[\s.]\d{4}(?!\d)/g, s=>!validCNS(s))},
+  {id:"rgctx",label:"RG (após \"RG\"/\"identidade\")", group:"Documentos", prefix:"RG", conf:"alta", prec:75, src:"padrão", on:true,
+   find: rx(/(?<=\b(?:RG|R\.G\.|[Ii]dentidade|C\.I\.)\s*(?:n[º°o.]?\s*|:\s*)?)(?:\d{1,2}\.?\d{3}\.?\d{3}-?[\dXx]|\d{5,14}(?:-[\dXx])?)(?![\w])/g)},
+  {id:"registro",label:"Registro profissional (OAB, CRM…)", group:"Documentos", prefix:"REGISTRO", conf:"alta", prec:85, src:"padrão", on:true,
+   find: rx(/\b(?:OAB|CRM|CRO|CRP|CREA|CRF|COREN|CRN|CREFITO|CRESS|CAU|CRC|CRMV)\s*[-/]?\s*(?:[A-Z]{2}\s*)?(?:n[º°o.]?\s*)?[:.-]?\s*\d{1,3}(?:\.?\d{3})*(?:-?[A-Z])?\b/g)},
+  {id:"prontuario",label:"Nº de prontuário", group:"Documentos", prefix:"PRONTUARIO", conf:"alta", prec:85, src:"padrão", on:true, sensivel:true,
+   find: rx(/(?<=\b[Pp]rontu[áa]rio\s*(?:n[º°o.]?|n[úu]mero)?\s*[:.-]?\s*)\d[\d.\/-]*\d/g)},
+  {id:"placa",label:"Placa de veículo", group:"Documentos", prefix:"PLACA", conf:"media", prec:70, src:"padrão", on:true,
    find: rx(/\b[A-Z]{3}-?\d[A-Z0-9]\d{2}\b/g)},
-  {id:"titulo",label:"Título de eleitor", group:"Documentos", prefix:"TITULO", conf:"baixa", prec:55, on:false,
+  {id:"titulo",label:"Título de eleitor", group:"Documentos", prefix:"TITULO", conf:"baixa", prec:55, src:"padrão", on:false,
    find: rx(/(?<!\d)\d{4}\s\d{4}\s\d{4}(?!\d)/g)},
-  {id:"rg",   label:"RG (frouxo)",      group:"Documentos", prefix:"RG", conf:"baixa", prec:35, on:false,
+  {id:"rg",   label:"RG (frouxo)",      group:"Documentos", prefix:"RG", conf:"baixa", prec:35, src:"padrão", on:false,
    find: rx(/(?<!\d)\d{1,2}\.?\d{3}\.?\d{3}-?[0-9Xx](?![\w])/g)},
 
   // --- contato ---
-  {id:"email",label:"E-mail",           group:"Contato", prefix:"EMAIL", conf:"alta", prec:90, on:true,
+  {id:"email",label:"E-mail",           group:"Contato", prefix:"EMAIL", conf:"alta", prec:90, src:"padrão", on:true,
    find: rx(/[\w.+-]+@[\w-]+\.[\w.-]+/g)},
-  {id:"tel",  label:"Telefone / celular", group:"Contato", prefix:"TEL", conf:"media", prec:60, on:true,
+  {id:"tel",  label:"Telefone / celular", group:"Contato", prefix:"TEL", conf:"media", prec:60, src:"padrão", on:true,
    find: rx(/(?<!\d)(?:\(?\d{2}\)?[\s.-]?)?(?:9[\s.-]?)?\d{4}[\s.-]?\d{4}(?!\d)/g)},
-  {id:"cep",  label:"CEP",              group:"Contato", prefix:"CEP", conf:"media", prec:65, on:true,
+  {id:"cep",  label:"CEP",              group:"Contato", prefix:"CEP", conf:"media", prec:65, src:"padrão", on:true,
    find: rx(/(?<!\d)\d{5}-?\d{3}(?!\d)/g)},
-  {id:"url",  label:"URL / site",       group:"Contato", prefix:"URL", conf:"alta", prec:90, on:true,
-   find: rx(/(?:https?:\/\/|www\.)[^\s,;]+/gi)},
-  {id:"handle",label:"@ rede social",   group:"Contato", prefix:"REDE", conf:"media", prec:40, on:false,
+  {id:"url",  label:"URL / site",       group:"Contato", prefix:"URL", conf:"alta", prec:90, src:"padrão", on:true,
+   find: rx(/(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s,;]+/gi)},
+  {id:"handle",label:"@ rede social",   group:"Contato", prefix:"REDE", conf:"media", prec:40, src:"padrão", on:false,
    find: rx(/(?<![\w@])@[A-Za-z0-9_]{2,}\b/g)},
-  {id:"ip",   label:"Endereço IP",      group:"Contato", prefix:"IP", conf:"alta", prec:90, on:false,
+  {id:"ip",   label:"Endereço IP",      group:"Contato", prefix:"IP", conf:"alta", prec:90, src:"padrão", on:false,
    find: rx(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g)},
 
   // --- financeiro ---
-  {id:"cartao",label:"Cartão (Luhn)",   group:"Financeiro", prefix:"CARTAO", conf:"alta", prec:100, on:true, sensivel:true,
+  {id:"cartao",label:"Cartão (Luhn)",   group:"Financeiro", prefix:"CARTAO", conf:"alta", prec:100, src:"padrão", on:true, sensivel:true,
    find: rx(/(?<!\d)(?:\d{4}[\s-]?){3}\d{4}(?!\d)/g, luhn)},
-  {id:"valor",label:"Valor em R$",      group:"Financeiro", prefix:"VALOR", conf:"baixa", prec:50, on:false,
+  {id:"valor",label:"Valor em R$",      group:"Financeiro", prefix:"VALOR", conf:"baixa", prec:50, src:"padrão", on:false,
    find: rx(/R\$\s?\d{1,3}(?:\.\d{3})*(?:,\d{2})?/g)},
 
   // --- localização (listas) ---
-  {id:"estado",label:"Estados (UF)",    group:"Localização", prefix:"ESTADO", conf:"media", prec:46, on:true,
+  {id:"estado",label:"Estados (UF)",    group:"Localização", prefix:"ESTADO", conf:"media", prec:46, src:"lista", on:true,
    find: rx(gazRegex(ESTADOS))},
-  {id:"cidade",label:"Capitais",        group:"Localização", prefix:"CIDADE", conf:"media", prec:45, on:true,
+  {id:"cidade",label:"Capitais",        group:"Localização", prefix:"CIDADE", conf:"media", prec:45, src:"lista", on:true,
    find: rx(gazRegex(CAPITAIS))},
-  {id:"pais", label:"Países",           group:"Localização", prefix:"PAIS", conf:"media", prec:44, on:true,
+  {id:"pais", label:"Países",           group:"Localização", prefix:"PAIS", conf:"media", prec:44, src:"lista", on:true,
    find: rx(gazRegex(PAISES))},
+  {id:"bairro",label:"Bairros (Jardim X, Vila Y, bairro Z)", group:"Localização", prefix:"LOCAL", conf:"media", prec:43, src:"heurística", on:true,
+   find: rx(/(?<![\p{L}])(?:(?:Jardim|Jd\.|Vila|Vl\.|Parque|Pq\.|Conjunto|Residencial|Recanto|Chácara|Loteamento|Núcleo)[ \t]+(?:d[aeo]s?[ \t]+)?\p{Lu}[\p{Ll}'-]+(?:[ \t](?:d[aeo]s?[ \t])?\p{Lu}[\p{Ll}'-]+)*|(?<=\b[Bb]airro[ \t]+)\p{Lu}[\p{Ll}'-]+(?:[ \t](?:d[aeo]s?[ \t])?\p{Lu}[\p{Ll}'-]+)*)/gu)},
 
   // --- pessoas / tempo ---
-  {id:"nome", label:"Nomes próprios (heurística)", group:"Pessoas", prefix:"PESSOA", conf:"baixa", prec:20, on:true,
+  {id:"nome", label:"Nomes próprios (heurística)", group:"Pessoas", prefix:"PESSOA", conf:"baixa", prec:20, src:"heurística", on:true,
    find: findNames},
-  {id:"data", label:"Datas",            group:"Pessoas", prefix:"DATA", conf:"media", prec:50, on:true,
+  {id:"data", label:"Datas",            group:"Pessoas", prefix:"DATA", conf:"media", prec:50, src:"padrão", on:true,
    find: rx(/\b\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}\b|\b\d{1,2}\s+de\s+(?:janeiro|fevereiro|março|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s+de\s+\d{4}\b/gi)},
-  {id:"idade",label:"Idade (NN anos)",  group:"Pessoas", prefix:"IDADE", conf:"baixa", prec:48, on:false,
+  {id:"idade",label:"Idade (NN anos)",  group:"Pessoas", prefix:"IDADE", conf:"baixa", prec:48, src:"padrão", on:false,
    find: rx(/\b\d{1,3}\s+anos\b/gi)},
 ];
+const GAZ_PREFIX = [[gazRegex(ESTADOS),"ESTADO"],[gazRegex(CAPITAIS),"CIDADE"],[gazRegex(PAISES),"PAIS"]];
+
+/* ===================== NER: tipos e pós-processamento ===================== */
+// tipo do AnonLab -> caixinha "(modelo)". prec: acima de listas/heurística para texto
+// (entre si iguais: o trecho mais longo vence); logo abaixo do padrão correspondente
+// para dados estruturados (o regex acerta a extensão).
+const NER_TYPES = {
+  PESSOA:   {label:"Pessoas",       prec:80, on:true},
+  ENDERECO: {label:"Endereços",     prec:80, on:true},
+  ORG:      {label:"Organizações",  prec:80, on:true},
+  LOCAL:    {label:"Locais",        prec:80, on:true},
+  DATA:     {label:"Datas",         prec:49, on:true},
+  CPF:      {label:"CPF",           prec:95, on:true},
+  CNPJ:     {label:"CNPJ",          prec:95, on:true},
+  RG:       {label:"RG",            prec:34, on:true},
+  CEP:      {label:"CEP",           prec:64, on:true},
+  TEL:      {label:"Telefones",     prec:59, on:true},
+  EMAIL:    {label:"E-mails",       prec:89, on:true},
+  VALOR:    {label:"Valores (R$)",  prec:49, on:false},
+  EVENTO:   {label:"Eventos",       prec:30, on:false},
+  OBRA:     {label:"Obras",         prec:30, on:false},
+};
+// rótulo do modelo -> tipo (fallback; o anonlab-model.json do pacote traz o seu)
+const NER_LABEL_MAP = {NOME:"PESSOA",PESSOA:"PESSOA",PER:"PESSOA",PERSON:"PESSOA",NAME:"PESSOA",
+  ORGANIZACAO:"ORG",ORG:"ORG",LOCAL:"LOCAL",LOC:"LOCAL",LOCATION:"LOCAL",ENDERECO:"ENDERECO",ADDRESS:"ENDERECO",
+  DATA:"DATA",TEMPO:"DATA",DATE:"DATA",TIME:"DATA",CPF:"CPF",CNPJ:"CNPJ",RG:"RG",CEP:"CEP",ZIPCODE:"CEP",
+  TELEFONE:"TEL",PHONE:"TEL",EMAIL:"EMAIL",DINHEIRO:"VALOR",VALOR:"VALOR",MONEY:"VALOR",
+  ACONTECIMENTO:"EVENTO",EVENTO:"EVENTO",EVENT:"EVENTO",OBRA:"OBRA"};
+const NER_MIN_SCORE = 0.35;
+const TEXT_TYPES = new Set(["PESSOA","ORG","LOCAL","CIDADE","ESTADO","PAIS","ENDERECO","EVENTO","OBRA","TERMO"]);
+const PROPAGATE = new Set(["PESSOA","ORG","LOCAL","CIDADE","ESTADO","PAIS","ENDERECO","EVENTO","OBRA"]);
+const PLACE_TYPES = new Set(["LOCAL","CIDADE","ESTADO","PAIS","ENDERECO"]);
+// o que pode separar dois pedaços da mesma entidade (o BERT parte "14.05.2013" em 3)
+const MERGE_GAP = {
+  DATA:/^[\s.\/-]{0,2}$/, CPF:/^[\s.\/-]{0,2}$/, CNPJ:/^[\s.\/-]{0,2}$/, RG:/^[\s.\/-]{0,2}$/, CEP:/^[\s.-]{0,2}$/,
+  TEL:/^[\s().-]{0,3}$/, VALOR:/^[\s.,]{0,2}$/, EMAIL:/^[.@]?$/,
+  ENDERECO:/^\s*[,–-]?\s*(?:n[º°o.]?\s*\d+[A-Za-z]?\s*[,–-]?\s*)?$/iu,
+  PESSOA:/^['-]?$/, ORG:/^['&-]?$/, LOCAL:/^-?$/,
+};
+const STREET_RE = /^(?:rua|r\.|av\.?|avenida|travessa|tv\.|alameda|al\.|estrada|rodovia|rod\.|pra[çc]a|largo|beco|viela|ladeira|servid[ãa]o|quadra|qd\.)\s/iu;
+// "Rua das Flores" + ", nº 120, apto. 302": número e complemento vão junto com o endereço
+function addressTail(text, end, isStreet){
+  const NUM=/^,?\s*(?:n[º°o.]|n[úu]mero)\s*\d{1,5}[A-Za-z]?(?![\p{L}\p{N}])/iu;
+  const BARE=/^,?\s*\d{1,5}[A-Za-z]?(?![\p{L}\p{N}])/u;                    // "Rua X, 1450" (só se começa com logradouro)
+  const COMP=/^,\s*(?:apto?\.?|apartamento|bloco|bl\.|casa|sala|conj(?:unto)?\.?|lote|lt\.)\s*[\w-]{1,6}(?![\p{L}\p{N}])/iu;
+  let m;
+  if((m=NUM.exec(text.slice(end,end+24))) || (isStreet && (m=BARE.exec(text.slice(end,end+24))))) end+=m[0].length;
+  while((m=COMP.exec(text.slice(end,end+24)))) end+=m[0].length;
+  return end;
+}
+const TITLES = "dona?|d\\.|dr\\.?|dra\\.?|sr\\.?|sra\\.?|srta\\.?|seu|senhor(?:a)?|doutor(?:a)?|prof\\.?|profa\\.?|professor(?:a)?|padre|pastor(?:a)?|irmã|irmão|tia|tio|dom|frei|madre|vó|vô|avó|avô";
+const TITLE_RE = new RegExp("^[\\s,]*(?:"+TITLES+")[\\s,]*$","iu");
+// "Sr. Benedito" → "Benedito": o pronome fica fora do nome (senão vira outra entidade)
+const LEADING_TITLE_RE = new RegExp("^(?:(?:"+TITLES+")(?![\\p{L}])\\s*)+","iu");
+// "nome" feito só de cargos/fórmulas ("JUIZ DE DIREITO DA") não é pessoa
+const ROLE_WORDS = new Set(("juiz juíza direito vara cível civel criminal comarca excelentíssimo excelentíssima meritíssimo "+
+  "meritíssima senhor senhora doutor doutora tribunal justiça ministério público promotor promotora defensor defensora "+
+  "procurador procuradora autor autora réu ré requerente requerido requerida reclamante reclamado reclamada advogado "+
+  "advogada relator relatora desembargador desembargadora paciente entrevistado entrevistada entrevistador entrevistadora "+
+  "pesquisador pesquisadora hospital municipal estadual federal secretaria prefeitura cartório oficial").split(" "));
+const onlyRoles = v => { const w=v.toLowerCase().split(/[^\p{L}]+/u).filter(x=>x && !/^(?:d[aeo]s?|e)$/.test(x)); return w.length>0 && w.every(x=>ROLE_WORDS.has(x)); };
+const confOf = score => score>=0.9 ? "alta" : score>=0.7 ? "media" : "baixa";
+const CONF_RANK = {alta:3, media:2, baixa:1};
+
+/* entidades do worker -> spans no formato dos detectores */
+function nerSpans(result, text){
+  const spans=[];
+  for(const [slug, ents] of Object.entries(result)){
+    const info = NER.model(slug);
+    const map = info?.meta?.label_map || {};
+    let list=[];
+    for(const e of ents){
+      const type = (e.label in map) ? map[e.label] : NER_LABEL_MAP[e.label.toUpperCase()];
+      if(!type || !NER_TYPES[type] || e.score<NER_MIN_SCORE) continue;
+      const det = DETECTORS.find(d=>d.id==="ner-"+type);
+      if(!det || !det.on) continue;
+      let {start,end} = e;
+      while(start<end && /\s/.test(text[start])) start++;
+      while(end>start && (/\s/.test(text[end-1]) || (TEXT_TYPES.has(type) && /[.,;:]/.test(text[end-1])))) end--;
+      if(type==="PESSOA"){
+        const t=LEADING_TITLE_RE.exec(text.slice(start,end)); if(t) start+=t[0].length;
+        if(end<=start || onlyRoles(text.slice(start,end))) continue;
+      }
+      if(end>start) list.push({start, end, type, score:e.score});
+    }
+    // junta pedaços da mesma entidade
+    list.sort((a,b)=>a.start-b.start);
+    const merged=[];
+    for(const s of list){
+      const p=merged[merged.length-1];
+      if(p && p.type===s.type && s.start>=p.end && MERGE_GAP[s.type]?.test(text.slice(p.end,s.start))){
+        p.score=(p.score*p.n+s.score)/(p.n+1); p.n++; p.end=s.end;
+      } else merged.push({...s, n:1});
+    }
+    for(const s of merged){
+      let prefix=s.type;
+      if(prefix==="LOCAL" || prefix==="ENDERECO"){   // "Bahia" exato numa lista vira ESTADO (mais específico)
+        const v=text.slice(s.start,s.end);
+        for(const [re,p] of GAZ_PREFIX){ re.lastIndex=0; const m=[...v.matchAll(re)][0]; if(m && m.index===0 && m[0].length===v.length){ prefix=p; break; } }
+      }
+      if(prefix==="ENDERECO") s.end=addressTail(text, s.end, STREET_RE.test(text.slice(s.start,s.end)));
+      spans.push({start:s.start, end:s.end, value:text.slice(s.start,s.end), prefix,
+        type:NER_TYPES[s.type].label.toLowerCase()+" (modelo)", conf:confOf(s.score), prec:NER_TYPES[s.type].prec,
+        src:"modelo", score:s.score, model:slug, sensivel:false});
+    }
+  }
+  return spans;
+}
+
+/* o que o modelo achou num lugar é procurado no texto todo (o NER às vezes perde ocorrências) */
+function propagate(spans, text){
+  const out=[], seen=new Set();
+  for(const s of spans){
+    if(!PROPAGATE.has(s.prefix)) continue;
+    const vals=[s.value.trim()];
+    const core=/^(?:bairro|distrito(?:\s+de)?|munic[íi]pio\s+de|cidade\s+de)\s+(\p{Lu}.{2,})$/iu.exec(vals[0]);
+    if(core) vals.push(core[1]);                  // "bairro Eldorado" → também "Eldorado"
+    for(const v of vals){
+      if(v.length<3) continue;
+      const key=s.prefix+"::"+normKey(v); if(seen.has(key)) continue; seen.add(key);
+      const pat=v.split(/\s+/).map(escRe).join("\\s+");
+      const re=new RegExp("(?<![\\p{L}\\p{N}])"+pat+"(?![\\p{L}\\p{N}])","giu");
+      for(const m of text.matchAll(re)){
+        if(!/^\p{Lu}/u.test(m[0])) continue;     // "rosa" (cor) ≠ "Rosa"
+        out.push({...s, start:m.index, end:m.index+m[0].length, value:m[0], prec:s.prec-1, src:"modelo·texto"});
+      }
+    }
+  }
+  return out;
+}
 
 /* ===================== UI: categorias ===================== */
 function buildCategories(){
   const groups={};
   DETECTORS.forEach(d => (groups[d.group] ??= []).push(d));
-  const box=$("#categories");
+  const box=$("#categories"); box.innerHTML="";
   for(const [g,list] of Object.entries(groups)){
     const det=document.createElement("details");
-    det.className="grp"; det.open = (g==="Documentos"||g==="Pessoas");
+    det.className="grp"; det.open = (g==="Documentos"||g==="Pessoas"||g==="Modelo (NER)");
     const onCount=list.filter(d=>d.on).length;
     det.innerHTML = `<summary>${g}<span class="sub">${onCount}/${list.length}</span></summary><div class="opts"></div>`;
     const opts=det.querySelector(".opts");
@@ -317,31 +865,73 @@ function buildCategories(){
       const l=document.createElement("label"); l.className="chk";
       l.innerHTML=`<input type="checkbox" data-id="${d.id}" ${d.on?"checked":""}>
         <span>${d.label}</span>
-        <span class="tag ${d.sensivel?"s":""}">${d.sensivel?"🔴 sensível":""} ${d.conf}</span>`;
-      l.querySelector("input").addEventListener("change",e=>{ d.on=e.target.checked; });
+        <span class="tag ${d.sensivel?"s":""}">${d.sensivel?"🔴 sensível":""} ${d.ner?"contexto":d.conf}</span>`;
+      l.querySelector("input").addEventListener("change",e=>{
+        d.on=e.target.checked;
+        det.querySelector("summary .sub").textContent=list.filter(x=>x.on).length+"/"+list.length;
+      });
       opts.appendChild(l);
     });
     box.appendChild(det);
   }
 }
+// caixinhas "(modelo)" para os tipos que os modelos carregados sabem achar
+function syncNerDetectors(){
+  const types=new Set(NER.types());
+  for(let i=DETECTORS.length-1;i>=0;i--) if(DETECTORS[i].ner && !types.has(DETECTORS[i].prefix)) DETECTORS.splice(i,1);
+  for(const t of Object.keys(NER_TYPES)){
+    if(!types.has(t) || DETECTORS.some(d=>d.id==="ner-"+t)) continue;
+    DETECTORS.push({id:"ner-"+t, label:NER_TYPES[t].label+" (modelo)", group:"Modelo (NER)", prefix:t,
+      conf:"alta", prec:NER_TYPES[t].prec, src:"modelo", on:NER_TYPES[t].on, ner:true});
+  }
+  buildCategories();
+}
 
 /* ===================== detecção ===================== */
 let ENTITIES=[];   // entidades agrupadas, com .accepted
 let SRCTEXT="";
+let DETECT_SEQ=0;
 
-function detect(){
-  SRCTEXT = $("#input").value;
-  if(!SRCTEXT.trim()){ alert("Cole um texto primeiro (ou clique Exemplo)."); return; }
+async function detect(){
+  const text = $("#input").value.normalize("NFC");   // "João" decomposto (NFD) quebraria listas e o modelo
+  if(!text.trim()){ alert("Cole um texto primeiro (ou clique Exemplo)."); return; }
+  const seq=++DETECT_SEQ;
+  SRCTEXT=text;
 
   // 1) coletar spans de todos os detectores ligados
   let spans=[];
   for(const d of DETECTORS){
-    if(!d.on) continue;
+    if(!d.on || !d.find) continue;
     for(const s of d.find(SRCTEXT))
-      spans.push({...s, prefix:d.prefix, type:d.label, conf:d.conf, prec:d.prec, sensivel:!!d.sensivel});
+      spans.push({...s, prefix:d.prefix, type:d.label, conf:d.conf, prec:d.prec, src:d.src, sensivel:!!d.sensivel});
   }
   // termos livres
   spans.push(...findFreeTerms(SRCTEXT));
+
+  // 1b) modelo de linguagem (assíncrono, num worker). Se ainda está carregando, espera.
+  $("#run-info").textContent="";
+  if(NER_LOADING.size){
+    busy(true,"⏳ Esperando o modelo carregar…");
+    await Promise.allSettled([...NER_LOADING]);
+    busy(false);
+    if(seq!==DETECT_SEQ) return;
+  }
+  if(NER.ready() && DETECTORS.some(d=>d.ner && d.on)){
+    busy(true,"⏳ Rodando o modelo…");
+    try{
+      const r = await NER.run(SRCTEXT, p => busy(true,`⏳ Modelo: ${p.done}/${p.total} janela${p.total>1?"s":""}…`));
+      if(seq!==DETECT_SEQ) return;
+      const ns=nerSpans(r.entities, SRCTEXT);
+      spans.push(...ns, ...propagate(ns, SRCTEXT));
+      const nm=Object.keys(r.entities).length;
+      $("#run-info").textContent = r.cached ? "Modelo: resultado reaproveitado (texto não mudou)."
+        : `Modelo${nm>1?"s":""}: ${nm>1?nm+" modelos, ":""}${r.windows} janela${r.windows>1?"s":""} de até 512 tokens em ${fmtS(r.ms)} · ${NER.describe()}`;
+    }catch(e){
+      if(seq!==DETECT_SEQ) return;
+      if(e.name==="AbortError") $("#run-info").textContent="Modelo cancelado — mostrando só as outras camadas.";
+      else { $("#run-info").textContent="⚠️ O modelo falhou ("+e.message+") — mostrando só as outras camadas."; console.error(e); }
+    }finally{ if(seq===DETECT_SEQ) busy(false); }
+  }
 
   // 2) resolver sobreposição: precedência desc, depois comprimento desc
   spans.sort((a,b)=> b.prec-a.prec || (b.end-b.start)-(a.end-a.start) || a.start-b.start);
@@ -350,13 +940,58 @@ function detect(){
     if(!kept.some(k => s.start < k.end && k.start < s.end)) kept.push(s);
   }
 
+  // 2a) descartado do mesmo tipo que estende um mantido ("Geraldo" do modelo + "Geraldo
+  //     Figueiredo" da heurística): vale a união, senão o sobrenome escapa. Pronome de
+  //     tratamento na ponta ("Dona", "Sr.") fica de fora.
+  const keptSet=new Set(kept);
+  for(const d of spans){
+    if(keptSet.has(d) || !TEXT_TYPES.has(d.prefix)) continue;
+    const over=kept.filter(k => d.start < k.end && k.start < d.end);
+    if(over.length!==1 || over[0].prefix!==d.prefix) continue;
+    const k=over[0];
+    let ns=Math.min(k.start,d.start), ne=Math.max(k.end,d.end);
+    const left=SRCTEXT.slice(ns,k.start), right=SRCTEXT.slice(k.end,ne);
+    if(ns<k.start && (TITLE_RE.test(left) || (k.prefix==="PESSOA" && !NAME_EXT_RE.test(left)))) ns=k.start;
+    if(ne>k.end && (TITLE_RE.test(right) || (k.prefix==="PESSOA" && !NAME_EXT_RE.test(right)))) ne=k.end;
+    if((ns===k.start && ne===k.end) || kept.some(o => o!==k && ns < o.end && o.start < ne)) continue;
+    k.start=ns; k.end=ne; k.value=SRCTEXT.slice(ns,ne);
+  }
+
+  // 2a') camadas que concordam no mesmo trecho reforçam a confiança: o modelo com 0,65
+  //      ("baixa") + a heurística de bairro ("média") em "Jardim Aurélia" = média.
+  //      Só vale entre tipos compatíveis (a heurística achar que "Recife" é pessoa não conta).
+  const compat=(a,b)=>a===b || (PLACE_TYPES.has(a) && PLACE_TYPES.has(b));
+  for(const d of spans){
+    if(keptSet.has(d)) continue;
+    for(const k of kept){
+      if(!compat(k.prefix,d.prefix)) continue;
+      if(!((k.start<=d.start && d.end<=k.end) || (d.start<=k.start && k.end<=d.end))) continue;
+      (k.also ??= new Set()).add(d.src);
+      if(CONF_RANK[d.conf]>CONF_RANK[k.conf]) k.conf=d.conf;
+      if(d.score) k.score=Math.max(k.score||0, d.score);
+    }
+  }
+
+  // 2b) mesmo texto, mesmo tipo: vale o tipo do span de maior precedência ("Recife" não vira LOCAL aqui e CIDADE ali)
+  const bestType=new Map();
+  for(const s of kept) if(TEXT_TYPES.has(s.prefix)){
+    const k=normKey(s.value), b=bestType.get(k);
+    if(!b || s.prec>b.prec) bestType.set(k,s);
+  }
+  for(const s of kept) if(TEXT_TYPES.has(s.prefix)) s.prefix=bestType.get(normKey(s.value)).prefix;
+
   // 3) agrupar em entidades (numéricos: chave por dígitos; texto: por minúsculas)
   const map=new Map();
   for(const s of kept){
     const numKey=/^(CPF|CNPJ|TEL|CEP|CARTAO|CNS|TITULO|RG|IP|PLACA|PROCESSO)$/.test(s.prefix);
-    const key = s.prefix+"::"+(numKey?onlyDigits(s.value):s.value.toLowerCase());
-    if(!map.has(key)) map.set(key,{prefix:s.prefix,type:s.type,conf:s.conf,sensivel:s.sensivel,value:s.value,spans:[]});
-    map.get(key).spans.push(s);
+    const key = s.prefix+"::"+(numKey?onlyDigits(s.value):normKey(s.value));
+    if(!map.has(key)) map.set(key,{prefix:s.prefix,type:s.type,conf:s.conf,sensivel:s.sensivel,value:s.value,spans:[],srcs:new Set(),score:0});
+    const e=map.get(key);
+    e.spans.push(s); e.srcs.add(s.src);
+    for(const x of s.also??[]) e.srcs.add(x);
+    if(CONF_RANK[s.conf]>CONF_RANK[e.conf]){ e.conf=s.conf; e.type=s.type; }
+    if(s.score) e.score=Math.max(e.score,s.score);
+    e.sensivel ||= s.sensivel;
   }
   ENTITIES=[...map.values()].map(e=>{
     e.spans.sort((a,b)=>a.start-b.start);
@@ -370,7 +1005,7 @@ function detect(){
 }
 
 function findFreeTerms(text){
-  const raw=$("#freeterms").value.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
+  const raw=$("#freeterms").value.normalize("NFC").split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
   if(!raw.length) return [];
   const word=$("#ft-word").checked, ci=$("#ft-ci").checked;
   const out=[];
@@ -378,7 +1013,7 @@ function findFreeTerms(text){
     const b = word ? "(?<![\\p{L}])(?:"+escRe(term)+")(?![\\p{L}])" : escRe(term);
     let re; try{ re=new RegExp(b, ci?"giu":"gu"); }catch(_){ continue; }
     for(const m of text.matchAll(re))
-      out.push({start:m.index,end:m.index+m[0].length,value:m[0],prefix:"TERMO",type:"termo livre",conf:"alta",prec:95,sensivel:false});
+      out.push({start:m.index,end:m.index+m[0].length,value:m[0],prefix:"TERMO",type:"termo livre",conf:"alta",prec:95,src:"termo",sensivel:false});
   }
   return out;
 }
@@ -400,12 +1035,16 @@ function renderReview(){
   ENTITIES.forEach((e,i)=>{
     const it=document.createElement("div");
     it.className="item"+(e.accepted?"":" off");
+    const viaModel=[...e.srcs].some(s=>s.startsWith("modelo"));
+    const srcs=[...new Set([...e.srcs].map(s=>s.startsWith("modelo")?"modelo":s==="heurística"?"heur.":s))];
+    const srcTitle = viaModel ? `modelo: ${Math.round(e.score*100)}% de confiança`+(e.srcs.has("modelo·texto")?" · também achado por busca no texto":"") : "";
     it.innerHTML=`
       <input type="checkbox" data-i="${i}" ${e.accepted?"checked":""}>
       <div class="kwic">${kwic(SRCTEXT,e.spans[0].start,e.spans[0].end)}</div>
       <div class="meta">
         <span class="cnt">${e.spans.length}×</span>
         <span class="pill type">${e.prefix}</span>
+        <span class="pill ${viaModel?"ner":""}" title="${escHtml(srcTitle)}">${srcs.join(" + ")}${viaModel?" "+Math.round(e.score*100)+"%":""}</span>
         ${e.sensivel?'<span class="pill" style="color:var(--warn);border-color:var(--warn)">🔴</span>':""}
         <span class="dot" style="background:${CONFCOLOR[e.conf]}" title="confiança ${e.conf}"></span>
       </div>`;
@@ -421,6 +1060,7 @@ function updateStats(){
   $("#s-total").textContent=ENTITIES.length;
   $("#s-on").textContent=on.length;
   $("#s-occ").textContent=on.reduce((a,e)=>a+e.spans.length,0);
+  $("#s-ner").textContent=ENTITIES.filter(e=>[...e.srcs].some(s=>s.startsWith("modelo"))).length;
   $("#s-sens").textContent=on.filter(e=>e.sensivel).length;
 }
 
@@ -454,6 +1094,296 @@ function download(name,text){
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
 
+/* ===================== NER: cliente do worker ===================== */
+// Runtime aceito: SHA-256 dos arquivos gerados por tools/build_ner_pack.py
+// (transformers.js 4.3.0 + onnxruntime-web 1.31.0-dev.20260914-8d85527a0).
+// Trocar de versão = gerar o pacote de novo e atualizar estes valores.
+const NER_RUNTIME = {
+  "transformers.min.js": "1475fd440e9932ab206682ee42cb18f6097403e9ee77ea62084c592d0f83597d",
+  "ort-wasm-simd-threaded.asyncify.mjs": "0966b6105cd936744498aa60df7a22cbd47af3374dbc64a9ab561c08a71e3611",
+  "ort-wasm-simd-threaded.asyncify.wasm": "49871f5a4409519797e127440868a6d1923339d9185907f301a5b2a1d90af082",
+};
+// ordem de preferência das variantes ONNX por dispositivo
+const DTYPE_ORDER = { "webgpu-f16":["fp16","q4f16","fp32","q4","q8"], webgpu:["fp32","q4","q8"], wasm:["q8","q4","fp32"] };
+
+const NER = (() => {
+  let pack=null, gpu;
+  const lanes=[], models=new Map(), cache=new Map();
+
+  // uma "pista" = um worker com sua própria cópia do runtime e dos modelos
+  function newLane(){
+    const L={seq:0, pending:new Map(), runs:new Set(), slugs:new Set()};
+    const src=$("#ner-core").textContent+"\n"+$("#ner-worker").textContent;
+    L.worker=new Worker(URL.createObjectURL(new Blob([src],{type:"text/javascript"})),{type:"module",name:"anonlab-ner-"+lanes.length});
+    L.worker.onmessage=({data:m})=>{
+      const p=L.pending.get(m.id); if(!p) return;
+      if(m.type==="progress") p.onProgress?.(m);
+      else { L.pending.delete(m.id); L.runs.delete(m.id); m.type==="done" ? p.resolve(m.result) : p.reject(Object.assign(new Error(m.message),{name:m.name||"Error"})); }
+    };
+    L.worker.onerror=e=>{ for(const p of L.pending.values()) p.reject(new Error(e.message||"falha no worker")); L.pending.clear(); };
+    L.call=(type,payload={},onProgress)=>{
+      const id=++L.seq;
+      if(type==="run") L.runs.add(id);
+      return new Promise((resolve,reject)=>{ L.pending.set(id,{resolve,reject,onProgress}); L.worker.postMessage({id,type,...payload}); });
+    };
+    const runtime={};
+    for(const name of Object.keys(NER_RUNTIME)) runtime[name]=pack.files.get("runtime/"+name);
+    L.ready=L.call("init",{runtime,trusted:NER_RUNTIME});
+    lanes.push(L);
+    return L;
+  }
+  function reset(){ for(const L of lanes) L.worker.terminate(); lanes.length=0; models.clear(); cache.clear(); }
+  // Na CPU cada worker usa 1 thread (sem SharedArrayBuffer em file://): várias pistas
+  // em paralelo, cada uma com um trecho do texto. Limitado por núcleos e memória.
+  function laneCount(device, bytes){
+    if(device==="webgpu") return 1;
+    const cores=navigator.hardwareConcurrency||2, memGB=navigator.deviceMemory||4;
+    return Math.max(1, Math.min(4, cores-1, Math.floor(memGB*0.5/(bytes*3/2**30))));
+  }
+  // corta o texto em k trechos (de preferência em quebras de linha), cada um com uma
+  // margem de contexto dos dois lados (nenhum token fica sem contexto no corte). Do
+  // trecho i só valem as entidades que começam no seu miolo [core0, core1).
+  function splitText(text, k, pad=500){
+    const cuts=[0];
+    for(let i=1;i<k;i++){
+      const ideal=Math.round(text.length*i/k), prev=cuts[cuts.length-1], slack=text.length/k/2;
+      let c=text.lastIndexOf("\n",ideal);
+      if(c<=prev || ideal-c>slack) c=text.indexOf("\n",ideal);
+      if(c<0 || c<=prev || c-ideal>slack){ const sp=text.lastIndexOf(" ",ideal); c = sp>prev ? sp : ideal; }
+      cuts.push(c);
+    }
+    cuts.push(text.length);
+    const segs=[];
+    for(let i=0;i<k;i++){
+      const core0=cuts[i], core1=cuts[i+1];
+      if(core1<=core0) continue;
+      let s=Math.max(0,core0-pad), e=Math.min(text.length,core1+pad);
+      if(s>0){ const w=text.indexOf(" ",s); if(w>=0 && w<core0) s=w+1; }
+      if(e<text.length){ const w=text.lastIndexOf(" ",e); if(w>core1) e=w; }
+      segs.push({start:s, core0, core1, text:text.slice(s,e)});
+    }
+    return segs;
+  }
+  async function gpuInfo(){
+    if(gpu!==undefined) return gpu;
+    try{ const a=await navigator.gpu?.requestAdapter({powerPreference:"high-performance"}); gpu=a?{f16:a.features.has("shader-f16"),name:[a.info?.vendor,a.info?.architecture].filter(Boolean).join(" ")}:null; }
+    catch(_){ gpu=null; }
+    return gpu;
+  }
+
+  /** Lê a pasta do pacote. entries: [{path, file}] (path relativo, com "/"). */
+  async function openPack(entries){
+    const mf=entries.filter(e=>/(^|\/)anonlab-ner\.json$/.test(e.path)).sort((a,b)=>a.path.length-b.path.length)[0];
+    if(!mf) throw new Error("esta pasta não é um pacote NER do AnonLab (falta anonlab-ner.json)");
+    const root=mf.path.slice(0,mf.path.length-"anonlab-ner.json".length);
+    const files=new Map(entries.filter(e=>e.path.startsWith(root)).map(e=>[e.path.slice(root.length),e.file]));
+    const manifest=JSON.parse(await mf.file.text());
+    if(manifest.kind!=="anonlab-ner-pack") throw new Error("anonlab-ner.json com formato desconhecido");
+    for(const name of Object.keys(NER_RUNTIME)) if(!files.has("runtime/"+name)) throw new Error("pacote incompleto: falta runtime/"+name);
+    const list=[];
+    for(const [slug,info] of Object.entries(manifest.models||{})){
+      const f=files.get(info.path+"/anonlab-model.json"); if(!f) continue;
+      list.push({slug, dir:info.path, meta:JSON.parse(await f.text())});
+    }
+    if(!list.length) throw new Error("o pacote não tem nenhum modelo");
+    reset();
+    pack={files, manifest, list};
+    return list;
+  }
+
+  // variante ONNX que roda no dispositivo (null = nenhuma: ex. modelo só com fp16 numa CPU)
+  const dtypeFor=(meta,g)=>DTYPE_ORDER[g ? (g.f16?"webgpu-f16":"webgpu") : "wasm"].find(d=>meta.variants[d]) || null;
+
+  async function load(slug, pref, onProgress){
+    const m=pack.list.find(x=>x.slug===slug);
+    const g = pref==="wasm" ? null : await gpuInfo();
+    if(pref==="webgpu" && !g) throw new Error("WebGPU indisponível neste navegador — use CPU");
+    const device = g ? "webgpu" : "wasm";
+    const dtype = dtypeFor(m.meta, g);
+    if(!dtype) throw new Error(device==="webgpu" ? "nenhuma variante do pacote roda nesta GPU (precisa de fp16?)"
+                                                 : "este modelo só tem variante para GPU (WebGPU)");
+    const v=m.meta.variants[dtype], files={};
+    for(const [p,info] of Object.entries({...m.meta.files, [v.file]:v})){
+      const f=pack.files.get(m.dir+"/"+p);
+      if(!f) throw new Error("pacote incompleto: falta "+m.dir+"/"+p);
+      if(f.size!==info.size) throw new Error(`${p}: tamanho não confere (cópia incompleta?)`);
+      files[p]={file:f, sha256:info.sha256};
+    }
+    const state={slug, meta:m.meta, device, dtype, size:v.size, gpu:g, status:"loading", lanes:0};
+    models.set(slug,state);
+    const payload={slug, files, device, dtype, meta:{id2label:m.meta.id2label, max_length:m.meta.max_length, stride:m.meta.stride}};
+    try{
+      const L0=lanes[0]||newLane();
+      await L0.ready;
+      const r=await L0.call("load",payload,onProgress);
+      L0.slugs.add(slug);
+      Object.assign(state,{status:"ready", loadMs:r.loadMs, warmMs:r.warmMs, lanes:1});
+      cache.clear();
+      // pistas extras (só CPU) carregam em segundo plano; o modelo já pode ser usado
+      const want=laneCount(device, v.size);
+      (async()=>{
+        for(let i=1;i<want && models.get(slug)===state;i++){
+          const L=lanes[i]||newLane();
+          try{ await L.ready; await L.call("load",payload); L.slugs.add(slug); state.lanes=i+1; cache.clear(); }
+          catch(e){ console.warn("pista extra do NER falhou:",e); break; }
+        }
+      })();
+      return state;
+    }catch(e){
+      models.delete(slug);
+      if(device==="webgpu" && pref==="auto"){      // GPU recusou (memória, driver…): tenta a CPU
+        const s=await load(slug,"wasm",onProgress); s.fallback=e.message; return s;
+      }
+      throw e;
+    }
+  }
+  async function unload(slug){
+    models.delete(slug); cache.clear();
+    for(const L of lanes) if(L.slugs.delete(slug)) await L.call("unload",{slug}).catch(()=>{});
+  }
+
+  async function run(text, onProgress, {maxLanes=4}={}){
+    const ready=[...models.values()].filter(m=>m.status==="ready");
+    const key=ready.map(m=>m.slug+":"+Math.min(m.lanes,maxLanes)).join("+")+"\u0000"+text;
+    if(cache.has(key)) return {...cache.get(key), cached:true};
+    const t0=performance.now(), entities={};
+    let windows=0, used=1;
+    for(const m of ready){
+      const ls=lanes.filter(L=>L.slugs.has(m.slug)).slice(0,maxLanes);
+      const segs=text.length>=ls.length*2000 ? splitText(text, ls.length) : [{start:0, core0:0, core1:text.length, text}];
+      used=Math.max(used,segs.length);
+      const prog=segs.map(()=>({done:0,total:0}));
+      const parts=await Promise.all(segs.map((sg,i)=>ls[i].call("run",{text:sg.text, slugs:[m.slug]}, p=>{
+        if(p.stage!=="infer") return;
+        prog[i]=p;
+        onProgress?.({done:prog.reduce((a,x)=>a+x.done,0), total:prog.reduce((a,x)=>a+x.total,0), slug:m.slug});
+      })));
+      entities[m.slug]=parts.flatMap((r,i)=>r.entities[m.slug]
+        .map(e=>({...e, start:e.start+segs[i].start, end:e.end+segs[i].start}))
+        .filter(e=>e.start>=segs[i].core0 && e.start<segs[i].core1));
+      windows+=parts.reduce((a,r)=>a+r.windows,0);
+    }
+    const r={entities, windows, lanes:used, ms:performance.now()-t0};
+    cache.clear(); cache.set(key,r);
+    return r;
+  }
+  function cancel(){ for(const L of lanes) for(const id of L.runs) L.worker.postMessage({type:"cancel",target:id}); }
+
+  const ready=()=>[...models.values()].some(m=>m.status==="ready");
+  function types(){
+    const t=new Set();
+    for(const m of models.values()) if(m.status==="ready")
+      for(const [lab,typ] of Object.entries(m.meta.label_map||{})) if(typ) t.add(typ); else if(NER_LABEL_MAP[lab]) t.add(NER_LABEL_MAP[lab]);
+    return [...t];
+  }
+  const where=m=>m.device==="webgpu" ? `GPU${m.gpu?.name?" ("+m.gpu.name+")":""} · WebGPU ${m.dtype}`
+    : `CPU · WASM ${m.dtype}${m.lanes>1?` · ${m.lanes} workers em paralelo`:""}`;
+  const describe=()=>[...new Set([...models.values()].filter(m=>m.status==="ready").map(where))].join("; ");
+  return {openPack, load, unload, run, cancel, ready, types, describe, where, dtypeFor, gpu:gpuInfo, model:slug=>models.get(slug),
+          loaded:()=>[...models.values()].filter(m=>m.status==="ready"), get pack(){ return pack; }};
+})();
+
+/* ---- NER: interface ---- */
+function nerStatus(html, badge, cls){
+  $("#ner-status").innerHTML=html;
+  const b=$("#ner-badge"); b.textContent=badge; b.className="pill"+(cls?" "+cls:"");
+}
+function nerBar(frac){
+  const bar=$("#ner-bar");
+  if(frac==null){ bar.hidden=true; return; }
+  bar.hidden=false; bar.firstElementChild.style.width=Math.round(Math.max(0,Math.min(1,frac))*100)+"%";
+}
+function busy(on,label){
+  const b=$("#detect");
+  b.disabled=on; b.textContent=on?label:"🔎 Detectar candidatos";
+  $("#cancel").hidden=!on;
+}
+
+const NER_LOADING=new Set();   // pacote/modelos carregando (o Detectar espera por eles)
+function openNerPack(entries){
+  const p=openNerPackNow(entries);
+  NER_LOADING.add(p); p.finally(()=>NER_LOADING.delete(p));
+  return p;
+}
+async function openNerPackNow(entries){
+  nerStatus("Lendo o pacote…","lendo");
+  let list;
+  try{ list=await NER.openPack(entries); }
+  catch(e){ nerStatus("⚠️ "+escHtml(e.message),"erro","bad"); return; }
+  await renderNerModels(true);
+}
+// lista de modelos do pacote; os que não têm variante para o dispositivo ficam desabilitados.
+// autoLoad: na GPU todos rodam juntos (um cobre o que o outro não tem); na CPU, que é
+// lenta, só o primeiro — os outros ficam a um clique
+async function renderNerModels(autoLoad){
+  const list=NER.pack.list;
+  const g = $("#ner-device").value==="wasm" ? null : await NER.gpu();
+  const runnable=list.filter(m=>NER.dtypeFor(m.meta,g));
+  const auto = autoLoad ? (g ? runnable : runnable.slice(0,1)) : [];
+  const box=$("#ner-models"); box.innerHTML="";
+  for(const m of list){
+    const ok=runnable.includes(m), on=auto.includes(m) || NER.model(m.slug)?.status==="ready";
+    const vs=Object.entries(m.meta.variants).map(([d,v])=>`${d} ${fmtMB(v.size)}`).join(" · ");
+    const labels=Object.entries(m.meta.label_map||{}).filter(([,t])=>t).map(([l])=>l).join(", ");
+    const row=document.createElement("label"); row.className="ner-model";
+    row.innerHTML=`<input type="checkbox" data-slug="${escHtml(m.slug)}" ${on&&ok?"checked":""} ${ok?"":"disabled data-never"}>
+      <span><b>${escHtml(m.meta.title||m.slug)}</b><br><span class="m">${escHtml(labels)}</span><br><span class="m">${escHtml(vs)}${m.meta.source?.license?" · licença "+escHtml(m.meta.source.license):""}</span>
+      ${ok?"":`<br><span class="m" style="color:var(--warn)">não roda ${g?"nesta GPU":"na CPU"} (só tem ${escHtml(Object.keys(m.meta.variants).join(", "))})</span>`}</span>`;
+    row.querySelector("input").addEventListener("change",ev=>ev.target.checked?loadNerModel(m.slug):unloadNerModel(m.slug));
+    box.appendChild(row);
+  }
+  for(const m of auto) await loadNerModel(m.slug);
+}
+function loadNerModel(slug){
+  const p=loadNerModelNow(slug);
+  NER_LOADING.add(p); p.finally(()=>NER_LOADING.delete(p));
+  return p;
+}
+async function loadNerModelNow(slug){
+  const m=NER.pack.list.find(x=>x.slug===slug), title=escHtml(m.meta.title||slug);
+  nerStatus(`Conferindo integridade e carregando <b>${title}</b>…`,"carregando"); nerBar(0);
+  document.querySelectorAll("#ner-models input").forEach(i=>i.disabled=true);
+  try{
+    const s=await NER.load(slug, $("#ner-device").value, p=>{
+      if(p.stage==="verify") nerStatus(`Conferindo SHA-256 de <code>${escHtml(p.file)}</code>…`,"carregando");
+      else if(p.stage==="load"){ nerStatus(`Carregando <b>${title}</b> na ${$("#ner-device").value==="wasm"?"CPU":"memória"}…`,"carregando"); if(p.total) nerBar(p.loaded/p.total); }
+    });
+    nerReadyStatus(s.fallback?`<span class="warn">A GPU recusou o modelo (${escHtml(s.fallback)}); usando a CPU, que é mais lenta.</span>`:"");
+  }catch(e){
+    console.error(e);
+    nerReadyStatus(`<span class="warn">⚠️ Não foi possível carregar ${title}: ${escHtml(e.message)}</span>`, true);
+    const cb=document.querySelector(`#ner-models input[data-slug="${CSS.escape(slug)}"]`); if(cb) cb.checked=false;
+  }finally{
+    nerBar(null);
+    document.querySelectorAll("#ner-models input:not([data-never])").forEach(i=>i.disabled=false);
+    syncNerDetectors();
+  }
+}
+// status = lista dos modelos prontos (+ aviso opcional)
+function nerReadyStatus(extra="", failed=false){
+  const all=NER.loaded();
+  const lines=all.map(x=>`✅ <b>${escHtml(x.meta.title||x.slug)}</b> · ${escHtml(NER.where(x))} · ${fmtMB(x.size)} · carregado em ${fmtS(x.loadMs+x.warmMs)}`);
+  if(all.some(x=>x.device==="wasm"&&x.meta.num_hidden_layers>12)) lines.push("Na CPU, modelos Large levam alguns segundos por página de texto.");
+  if(extra) lines.push(extra);
+  if(!all.length && !extra) lines.push("Nenhum modelo ativo. Marque um modelo acima para carregá-lo.");
+  nerStatus(lines.join("<br>"), all.length?"pronto":failed?"erro":"desligado", all.length?"ok":failed?"bad":"");
+}
+async function unloadNerModel(slug){ await NER.unload(slug); syncNerDetectors(); nerReadyStatus(); }
+
+// arrastar a pasta para o cartão
+async function entriesFromDrop(dt){
+  const out=[];
+  const walk=async(entry,path)=>{
+    if(entry.isFile) out.push({path:path+entry.name, file:await new Promise((res,rej)=>entry.file(res,rej))});
+    else if(entry.isDirectory){
+      const rd=entry.createReader(); let batch;
+      do{ batch=await new Promise((res,rej)=>rd.readEntries(res,rej)); for(const e of batch) await walk(e,path+entry.name+"/"); }while(batch.length);
+    }
+  };
+  for(const it of [...dt.items]){ const e=it.webkitGetAsEntry?.(); if(e) await walk(e,""); }
+  return out;
+}
+
 /* ===================== eventos ===================== */
 $("#input").addEventListener("input",()=>{ $("#charcount").textContent=$("#input").value.length+" caracteres"; });
 $("#file").addEventListener("change",e=>{
@@ -461,6 +1391,7 @@ $("#file").addEventListener("change",e=>{
   const r=new FileReader(); r.onload=()=>{ $("#input").value=r.result; $("#input").dispatchEvent(new Event("input")); }; r.readAsText(f,"utf-8");
 });
 $("#detect").addEventListener("click",detect);
+$("#cancel").addEventListener("click",()=>NER.cancel());
 $("#apply").addEventListener("click",apply);
 $("#copy").addEventListener("click",()=>{ const o=$("#output"); o.select(); try{document.execCommand("copy");}catch(_){ } navigator.clipboard?.writeText(o.value).catch(()=>{}); });
 $("#dl").addEventListener("click",()=>download("documento_anonimizado.txt",$("#output").value||""));
@@ -476,13 +1407,35 @@ $("#sel-high").addEventListener("click",()=>{ ENTITIES.forEach(e=>e.accepted=e.c
 $("#sel-names").addEventListener("click",()=>{ ENTITIES.forEach(e=>{ if(e.prefix==="PESSOA") e.accepted=true; }); renderReview(); apply(); });
 document.querySelectorAll('input[name=mode]').forEach(r=>r.addEventListener("change",apply));
 
+$("#ner-open").addEventListener("click",()=>$("#ner-dir").click());
+$("#ner-dir").addEventListener("change",e=>{
+  const entries=[...e.target.files].map(f=>({path:f.webkitRelativePath||f.name, file:f}));
+  e.target.value="";
+  if(entries.length) openNerPack(entries);
+});
+$("#ner-device").addEventListener("change",async()=>{
+  if(!NER.pack) return;
+  const active=NER.loaded().map(m=>m.slug);
+  for(const s of active) await NER.unload(s);
+  await renderNerModels(false);
+  // recarrega no novo dispositivo o que estava ativo e ainda roda nele
+  for(const inp of document.querySelectorAll("#ner-models input:not([data-never])"))
+    if(active.includes(inp.dataset.slug)){ inp.checked=true; await loadNerModel(inp.dataset.slug); }
+  syncNerDetectors(); nerReadyStatus();
+});
+const card=$("#ner-card");
+card.addEventListener("dragover",e=>{ e.preventDefault(); card.classList.add("drop"); });
+card.addEventListener("dragleave",()=>card.classList.remove("drop"));
+card.addEventListener("drop",async e=>{ e.preventDefault(); card.classList.remove("drop"); const en=await entriesFromDrop(e.dataTransfer); if(en.length) openNerPack(en); });
+
 $("#sample").addEventListener("click",()=>{
   $("#input").value=
 `Entrevista realizada em 12/03/2021 com João da Silva, 42 anos, morador de Recife, Pernambuco.
 Ele relatou que trabalhou com Maria Oliveira na empresa Tecidos Brasil Ltda.
 Contato: joao.silva@email.com, telefone (81) 99876-5432.
 CPF informado: 529.982.247-25. O processo 0001234-56.2021.8.17.0001 corre na Bahia.
-Mencionou o Dr. Carlos Andrade e uma viagem a Portugal em 03/2020.`;
+Mencionou o Dr. Carlos Andrade e uma viagem a Portugal em 03/2020.
+Luíza, a vizinha, mora na Rua das Flores, nº 120, bairro Boa Viagem. Segundo João, luíza é quem cuida do Pedrinho.`;
   $("#input").dispatchEvent(new Event("input"));
   $("#freeterms").value="Tecidos Brasil";
   detect();
@@ -490,6 +1443,8 @@ Mencionou o Dr. Carlos Andrade e uma viagem a Portugal em 03/2020.`;
 
 /* init */
 buildCategories();
+// para os testes automatizados (tests/harness.html); não expõe nada para fora da página
+window.AnonLab = {NER, NerCore, detect, openNerPack, loadNerModel, entities:()=>ENTITIES};
 </script>
 </body>
 </html>

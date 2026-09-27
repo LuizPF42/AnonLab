@@ -1,0 +1,267 @@
+{
+  "_sobre": "Documentos FICTÍCIOS para medir vazamento: depois de Detectar (com as sugestões aceitas por padrão), nenhuma string de 'pii' pode sobrar no texto anonimizado. 'fp_ok' lista termos que NÃO são dados pessoais (se forem substituídos, conta como excesso). Nomes, números e endereços são inventados; CPFs têm dígito verificador válido de propósito.",
+  "docs": [
+    {
+      "id": "entrevista",
+      "tipo": "entrevista qualitativa (transcrição)",
+      "text": "Pesquisa Trabalho e Cuidado — Entrevista 07\nData: 14/09/2022. Local: residência da entrevistada, em Contagem (MG).\nEntrevistadora: Paula Mendes. Entrevistada: Rosângela Aparecida Moreira, 58 anos, costureira.\n\nPAULA: Dona Rosângela, a senhora pode contar como começou a trabalhar com costura?\nROSÂNGELA: Olha, eu comecei com uns quinze anos, na confecção do seu Geraldo Figueiredo, lá no bairro Eldorado. Minha mãe, a Conceição, que me levou. Depois a fábrica fechou e eu fui pra Malharia Santa Clara, perto da Avenida João César de Oliveira.\nPAULA: E a senhora mora aqui desde quando?\nROSÂNGELA: Desde 1994. Antes eu morava em Sete Lagoas com meu marido, o Antônio Carlos. Quando ele adoeceu, a gente veio pra perto da minha irmã, a Lúcia, que mora na Rua Itaguara, 312.\nPAULA: Quem ajuda a senhora hoje em casa?\nROSÂNGELA: Minha neta, a Júlia, que estuda no Colégio Estadual Pio XII. E o Tião, meu vizinho, sempre dá uma força. Se precisar falar comigo depois, o meu celular é (31) 98765-4321, ou manda e-mail pra rosangela.moreira58@gmail.com.\nPAULA: E a sua saúde, como está?\nROSÂNGELA: Tenho pressão alta. Faço acompanhamento no posto do Eldorado com a doutora Fernanda Queiroz. Meu cartão do SUS é 752 6018 1590 8302.\nPAULA: Obrigada, dona Rosângela.\n[fim da gravação — 47 min]",
+      "pii": [
+        {
+          "text": "Paula Mendes",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Rosângela Aparecida Moreira",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Rosângela",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "ROSÂNGELA",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Geraldo Figueiredo",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Conceição",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Antônio Carlos",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Lúcia",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Júlia",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Tião",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Fernanda Queiroz",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Rua Itaguara, 312",
+          "tipo": "ENDERECO"
+        },
+        {
+          "text": "Avenida João César de Oliveira",
+          "tipo": "ENDERECO"
+        },
+        {
+          "text": "Eldorado",
+          "tipo": "LOCAL"
+        },
+        {
+          "text": "Contagem",
+          "tipo": "LOCAL"
+        },
+        {
+          "text": "Sete Lagoas",
+          "tipo": "LOCAL"
+        },
+        {
+          "text": "Malharia Santa Clara",
+          "tipo": "ORG"
+        },
+        {
+          "text": "Colégio Estadual Pio XII",
+          "tipo": "ORG"
+        },
+        {
+          "text": "(31) 98765-4321",
+          "tipo": "TEL"
+        },
+        {
+          "text": "rosangela.moreira58@gmail.com",
+          "tipo": "EMAIL"
+        },
+        {
+          "text": "752 6018 1590 8302",
+          "tipo": "CNS"
+        },
+        {
+          "text": "14/09/2022",
+          "tipo": "DATA"
+        }
+      ],
+      "fp_ok": [
+        "Pesquisa Trabalho e Cuidado",
+        "costura",
+        "pressão alta",
+        "Olha",
+        "Dona",
+        "a senhora pode contar"
+      ]
+    },
+    {
+      "id": "prontuario",
+      "tipo": "prontuário / evolução clínica",
+      "text": "HOSPITAL MUNICIPAL DR. OSWALDO CRUZ — Evolução de enfermagem\nPaciente: Benedito Augusto Ramos   Prontuário nº 448.213   Leito 12B\nNascimento: 02/11/1949 (74 anos). Mãe: Maria José Ramos. CPF 390.533.447-05.\nEndereço: Travessa das Acácias, 88, Vila Nova, Campinas/SP, CEP 13058-410. Tel. (19) 3241-8876.\nResponsável: filho, Marcos Ramos, fone 19 99112-3344.\n\n08/03/2024 07h40 — Paciente acordado, orientado. Relata dor em MIE. Sr. Benedito refere que dormiu mal. Medicado conforme prescrição da Dra. Helena Tavares (CRM-SP 123456).\n08/03/2024 14h10 — Visita da esposa, dona Iracema, que trouxe exames do Laboratório Bio Análises. Benedito aceitou a dieta.\nAlta prevista para 11/03/2024, com retorno na UBS Jardim Aurélia.",
+      "pii": [
+        {
+          "text": "Benedito Augusto Ramos",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Benedito",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Maria José Ramos",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Marcos Ramos",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Helena Tavares",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Iracema",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "390.533.447-05",
+          "tipo": "CPF"
+        },
+        {
+          "text": "448.213",
+          "tipo": "PRONTUARIO"
+        },
+        {
+          "text": "02/11/1949",
+          "tipo": "DATA"
+        },
+        {
+          "text": "Travessa das Acácias, 88",
+          "tipo": "ENDERECO"
+        },
+        {
+          "text": "Vila Nova",
+          "tipo": "LOCAL"
+        },
+        {
+          "text": "Campinas",
+          "tipo": "LOCAL"
+        },
+        {
+          "text": "13058-410",
+          "tipo": "CEP"
+        },
+        {
+          "text": "(19) 3241-8876",
+          "tipo": "TEL"
+        },
+        {
+          "text": "19 99112-3344",
+          "tipo": "TEL"
+        },
+        {
+          "text": "123456",
+          "tipo": "CRM"
+        },
+        {
+          "text": "Jardim Aurélia",
+          "tipo": "LOCAL"
+        }
+      ],
+      "fp_ok": [
+        "Evolução de enfermagem",
+        "dor em MIE",
+        "dieta",
+        "Prontuário nº",
+        "Leito 12B",
+        "Sr.",
+        "Paciente acordado"
+      ]
+    },
+    {
+      "id": "peticao",
+      "tipo": "peça jurídica",
+      "text": "EXCELENTÍSSIMO SENHOR DOUTOR JUIZ DE DIREITO DA 3ª VARA CÍVEL DA COMARCA DE FORTALEZA/CE\n\nProcesso nº 0812345-67.2023.8.06.0001\n\nFRANCISCA DAS CHAGAS LIMA, brasileira, solteira, professora, portadora do RG nº 2004567890 SSP/CE e inscrita no CPF sob o nº 111.444.777-35, residente e domiciliada na Rua Padre Valdevino, 1450, apto. 302, Aldeota, Fortaleza/CE, CEP 60135-040, e-mail francisca.lima@hotmail.com, por seu advogado infra-assinado, vem propor a presente AÇÃO DE INDENIZAÇÃO em face de CONSTRUTORA HORIZONTE LTDA., inscrita no CNPJ sob o nº 11.222.333/0001-81, com sede na Avenida Santos Dumont, 2100, Fortaleza/CE, pelos fatos a seguir.\n\nEm 15 de janeiro de 2023, a autora adquiriu o imóvel. O representante da ré, Sr. Roberto Nogueira Sampaio, garantiu a entrega em junho. A vizinha Antônia Ferreira presenciou a negociação, nos termos do art. 186 do Código Civil e da Lei nº 8.078/1990.\n\nNestes termos, pede deferimento.\nFortaleza, 20 de março de 2023.\nJOSÉ WELLINGTON BARROS — OAB/CE 45.678",
+      "pii": [
+        {
+          "text": "FRANCISCA DAS CHAGAS LIMA",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "2004567890",
+          "tipo": "RG"
+        },
+        {
+          "text": "111.444.777-35",
+          "tipo": "CPF"
+        },
+        {
+          "text": "Rua Padre Valdevino, 1450",
+          "tipo": "ENDERECO"
+        },
+        {
+          "text": "Aldeota",
+          "tipo": "LOCAL"
+        },
+        {
+          "text": "60135-040",
+          "tipo": "CEP"
+        },
+        {
+          "text": "francisca.lima@hotmail.com",
+          "tipo": "EMAIL"
+        },
+        {
+          "text": "11.222.333/0001-81",
+          "tipo": "CNPJ"
+        },
+        {
+          "text": "Avenida Santos Dumont, 2100",
+          "tipo": "ENDERECO"
+        },
+        {
+          "text": "Roberto Nogueira Sampaio",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Antônia Ferreira",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "JOSÉ WELLINGTON BARROS",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "45.678",
+          "tipo": "OAB"
+        },
+        {
+          "text": "0812345-67.2023.8.06.0001",
+          "tipo": "PROCESSO"
+        },
+        {
+          "text": "15 de janeiro de 2023",
+          "tipo": "DATA"
+        }
+      ],
+      "fp_ok": [
+        "Código Civil",
+        "Lei nº 8.078/1990",
+        "AÇÃO DE INDENIZAÇÃO",
+        "art. 186",
+        "EXCELENTÍSSIMO SENHOR DOUTOR JUIZ",
+        "Nestes termos, pede deferimento"
+      ]
+    }
+  ]
+}

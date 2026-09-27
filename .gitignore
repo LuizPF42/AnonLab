@@ -1,0 +1,7 @@
+# pacote NER gerado por tools/build_ner_pack.py (centenas de MB; distribuir fora do git)
+dist/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
