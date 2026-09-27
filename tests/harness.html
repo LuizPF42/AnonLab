@@ -14,7 +14,11 @@
 </head>
 <body>
 <iframe id="app"></iframe>
-<script>document.getElementById("app").src = "../anonimizador.html?t=" + Date.now();</script>
+<script>
+// começa limpo: sem "carregar sozinho" de um teste anterior (a menos que ?auto)
+if(!location.search.includes("auto")) localStorage.removeItem("anonlab.ner.auto");
+document.getElementById("app").src = "../anonimizador.html?t=" + Date.now();
+</script>
 <script>
 async function getJSON(u){ const r = await fetch(u, { cache: "no-store" }); if(!r.ok) throw new Error(u+" "+r.status); return r.json(); }
 async function loadPack(base = "../dist/anonlab-ner/", dtypes = null){
@@ -63,7 +67,14 @@ async function evalGolden(){
   return { recall: +(1 - tot.vazou / tot.pii).toFixed(3), recall_estrito: +(1 - (tot.vazou + tot.parcial) / tot.pii).toFixed(3), ...tot, docs: res };
 }
 
-window.harness = { loadPack, evalGolden, app: () => document.getElementById("app").contentWindow,
+// modo "🌐 Baixar modelos" contra o Hugging Face falso de tests/fake_hf.py
+async function openFakeHub(){
+  const A = document.getElementById("app").contentWindow.AnonLab;
+  A.NER_HUB.host = location.origin + "/fakehf/";
+  await A.openNerHub();
+}
+
+window.harness = { loadPack, evalGolden, openFakeHub, app: () => document.getElementById("app").contentWindow,
                    doc: () => document.getElementById("app").contentDocument };
 </script>
 </body>

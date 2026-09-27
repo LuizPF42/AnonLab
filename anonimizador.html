@@ -4,21 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!--
-  AIRGAP GARANTIDO PELO NAVEGADOR: esta política proíbe qualquer acesso à rede.
-  connect-src só aceita blob:/data: (dados que já estão na memória); não há
-  img/font/frame/form externos. Vale também para o worker do modelo NER, que
-  herda a política desta página.
+  O TEXTO NUNCA SAI DO NAVEGADOR. Esta política só deixa a página se conectar a
+  jsDelivr (runtime do modelo) e Hugging Face (arquivos do modelo), e só para
+  BAIXAR. Não há img/font/frame/form externos, e código só executa se for inline
+  ou blob: (o runtime baixado vira blob: depois de conferido o SHA-256). Vale
+  também para o worker do modelo NER, que herda a política desta página.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob: 'wasm-unsafe-eval'; worker-src blob:; connect-src blob: data:; style-src 'unsafe-inline'; img-src data: blob:; base-uri 'none'; form-action 'none'">
-<title>Anonimizador de Documentos — offline</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob: 'wasm-unsafe-eval'; worker-src blob:; connect-src 'self' blob: data: https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co; style-src 'unsafe-inline'; img-src data: blob:; base-uri 'none'; form-action 'none'">
+<title>Anonimizador de Documentos</title>
 <!--
-  FERRAMENTA AIRGAPPED. Arquivo único, sem instalador, sem rede.
-  Auditoria: não há nenhum endereço de rede neste arquivo, nem XMLHttpRequest.
-  As únicas ocorrências de fetch/import servem arquivos LOCAIS (blob:) ao modelo
-  NER opcional, que vem de uma pasta escolhida por você; o runtime dele só é
-  executado se o SHA-256 bater com os valores fixados aqui (NER_RUNTIME).
-  A CSP acima faz o navegador bloquear qualquer outra tentativa.
-  Abra com duplo clique. Nada é enviado para lugar nenhum.
+  Arquivo único, sem instalador. Abre pelo GitHub Pages ou com duplo clique.
+  Auditoria: as únicas requisições de rede são GETs de arquivos estáticos do
+  modelo NER opcional: runtime (transformers.js + onnxruntime-web) no jsDelivr,
+  executado só se o SHA-256 bater com NER_RUNTIME, e modelos ONNX no Hugging
+  Face, numa revisão fixa (NER_HUB). O documento em si nunca é enviado: ele só
+  existe nesta página e no worker do modelo, na memória.
+  Modo offline: carregando o "pacote NER" de uma pasta local, nada é baixado.
 -->
 <style>
   :root{
@@ -113,7 +114,7 @@
 <header>
   <h1>🛡️ Anonimizador de Documentos</h1>
   <span class="badge exp" title="Protótipo de pesquisa, fornecido sem garantia. Não garante anonimização: revise todo o resultado antes de usar.">⚠️ EXPERIMENTAL · sem garantia</span>
-  <span class="badge net" id="netbadge">● offline · nada sai daqui</span>
+  <span class="badge net" id="netbadge" title="O documento é processado neste navegador e não é enviado a nenhum servidor. Só o modelo é baixado (se você pedir).">● o texto não sai daqui</span>
   <span class="sub">v1 · arquivo único · sem instalador · NER opcional (BERTimbau)</span>
 </header>
 
@@ -144,7 +145,7 @@
     <div class="card" id="ner-card">
       <h2>3 · Modelo de linguagem (NER) <span class="pill" id="ner-badge">opcional</span></h2>
       <div class="row between">
-        <label class="file"><input type="file" id="ner-dir" webkitdirectory multiple><button class="ghost sm" id="ner-open">📦 Carregar pacote NER…</button></label>
+        <button class="sm" id="ner-hub" title="Baixa os modelos do Hugging Face para este navegador (uma vez; depois ficam guardados). O seu texto não é enviado.">🌐 Baixar modelos</button>
         <label class="sub">rodar na
           <select id="ner-device" title="Onde o modelo roda. Automático usa a GPU (WebGPU) quando disponível.">
             <option value="auto">automático</option>
@@ -153,12 +154,16 @@
           </select>
         </label>
       </div>
-      <p class="note" id="ner-status">Opcional. Com o pacote NER (BERTimbau), a detecção entende o contexto e acha nomes, endereços e outros dados que as regras não pegam. Selecione a pasta <code>anonlab-ner</code> ou arraste-a para cá.</p>
+      <p class="note" id="ner-status">Opcional. Com um modelo BERTimbau, a detecção entende o contexto e acha nomes, endereços e outros dados que as regras não pegam. <b>O modelo vem até o navegador; o seu texto não vai a lugar nenhum.</b> O primeiro download é grande (~850 MB na GPU, ~310 MB na CPU) e fica guardado para as próximas vezes.</p>
       <div class="bar" id="ner-bar" hidden><i></i></div>
       <div id="ner-models"></div>
+      <div class="opt-inline">
+        <label class="chk"><input type="checkbox" id="ner-auto"> carregar sozinho ao abrir</label>
+        <label class="file"><input type="file" id="ner-dir" webkitdirectory multiple><button class="ghost sm" id="ner-open" title="Modo offline: pasta anonlab-ner gerada por tools/build_ner_pack.py">📦 pasta local…</button></label>
+      </div>
       <details class="help">
-        <summary>Onde consigo o pacote? É seguro?</summary>
-        <p class="note">O pacote é uma pasta gerada uma vez, numa máquina com internet, por <code>tools/build_ner_pack.py</code> (veja o README), e copiada para cá. Contém o modelo convertido para ONNX e o runtime (transformers.js + onnxruntime-web). Tudo roda neste computador: GPU via WebGPU ou CPU via WebAssembly. O runtime só é executado se o SHA-256 conferir com o fixado neste arquivo, e a política de segurança da página bloqueia qualquer acesso à rede.</p>
+        <summary>De onde vem o modelo? É seguro?</summary>
+        <p class="note">Os modelos são conversões para ONNX de <a href="https://huggingface.co/celiudos/legal-bert-lgpd" target="_blank" rel="noopener">legal-bert-lgpd</a> e <a href="https://huggingface.co/liaad/NER_harem_bert-base-portuguese-cased" target="_blank" rel="noopener">HAREM (LIAAD)</a>, publicadas no Hugging Face numa revisão fixa. O runtime (transformers.js + onnxruntime-web) vem do jsDelivr e só é executado se o SHA-256 conferir com o fixado neste arquivo. Tudo roda neste computador: GPU via WebGPU ou CPU via WebAssembly. A política de segurança da página só permite conectar a esses dois serviços, e só para baixar arquivos; o documento nunca é enviado. Sem internet? Use <b>pasta local</b> com o pacote gerado por <code>tools/build_ner_pack.py</code> (veja o README).</p>
       </details>
     </div>
 
@@ -423,12 +428,14 @@ const NerCore = (() => {
 
 <script type="text/js-worker" id="ner-worker">
 /* ===================== worker do modelo NER =====================
-   Recebe os arquivos do pacote (objetos File), confere o SHA-256 de tudo,
-   importa o transformers.js a partir de um blob: e roda o modelo (WebGPU ou
-   WASM). Rede: nenhuma. env.fetch só entrega arquivos do pacote (qualquer outro
-   endereço recebe 404 sem sair daqui) e a CSP herdada bloqueia o resto. */
+   Dois modos. "hub": runtime baixado do jsDelivr e modelos do Hugging Face
+   (guardados no cache do navegador). "pacote": tudo de uma pasta local, sem
+   rede. Nos dois, o runtime só é importado (de um blob:) se o SHA-256 bater, e
+   env.fetch só busca o que é do modo (o resto recebe 404 sem sair daqui). O
+   texto do documento fica neste worker e na página; nunca vai para a rede. */
 let T = null;                   // módulo transformers.js
-const VFS = new Map();          // "slug/arquivo" -> File
+let HUB = null;                 // {host} no modo hub
+const VFS = new Map();          // "slug/arquivo" -> File (modo pacote)
 const MODELS = new Map();       // slug -> modelo carregado
 const CANCEL = new Set();
 const post = m => self.postMessage(m);
@@ -437,8 +444,14 @@ async function sha256(buf) {
   const d = await crypto.subtle.digest("SHA-256", buf);
   return Array.from(new Uint8Array(d), b => b.toString(16).padStart(2, "0")).join("");
 }
-async function verified(file, sha, what) {
-  const buf = await file.arrayBuffer();
+// File (pacote) ou URL (CDN) → bytes conferidos
+async function verified(src, sha, what) {
+  let buf;
+  if (typeof src === "string") {
+    const r = await fetch(src, { credentials: "omit" });
+    if (!r.ok) throw new Error(`${what}: download falhou (HTTP ${r.status})`);
+    buf = await r.arrayBuffer();
+  } else buf = await src.arrayBuffer();
   const got = await sha256(buf);
   if (got !== sha) throw new Error(`${what}: SHA-256 não confere (arquivo alterado ou corrompido)`);
   return buf;
@@ -450,14 +463,29 @@ async function packFetch(input) {
   if (!f) return new Response(null, { status: 404, statusText: "fora do pacote" });
   return new Response(f, { status: 200, headers: { "content-length": String(f.size) } });
 }
+// modo hub: só o host de modelos (os redirecionamentos para a CDN dele o navegador segue sozinho)
+const hubFetch = (input, init) => {
+  const url = String(typeof input === "string" ? input : input?.url ?? input);
+  if (!url.startsWith(HUB.host)) return Promise.resolve(new Response(null, { status: 404, statusText: "fora do hub" }));
+  return fetch(input, { ...init, credentials: "omit" });
+};
 
-async function init({ id, runtime, trusted }) {
+async function init({ id, runtime, trusted, hub }) {
   const bufs = {};
-  for (const [name, file] of Object.entries(runtime)) bufs[name] = await verified(file, trusted[name], name);
+  for (const [name, src] of Object.entries(runtime)) {
+    post({ id, type: "progress", stage: "runtime", file: name });
+    bufs[name] = await verified(src, trusted[name], name);
+  }
   const blob = (buf, type) => URL.createObjectURL(new Blob([buf], { type }));
   T = await import(blob(bufs["transformers.min.js"], "text/javascript"));
   const env = T.env;
-  Object.assign(env, {
+  HUB = hub || null;
+  if (HUB) Object.assign(env, {
+    allowRemoteModels: true, allowLocalModels: false, remoteHost: HUB.host,
+    useBrowserCache: typeof caches !== "undefined", useFSCache: false, useCustomCache: false, useWasmCache: false,
+    fetch: hubFetch,
+  });
+  else Object.assign(env, {
     allowRemoteModels: false, allowLocalModels: true, localModelPath: "/models/",
     useBrowserCache: false, useFSCache: false, useCustomCache: false, useWasmCache: false,
     fetch: packFetch,
@@ -471,19 +499,26 @@ async function init({ id, runtime, trusted }) {
   post({ id, type: "done", result: { version: env.version } });
 }
 
-async function load({ id, slug, files, device, dtype, meta }) {
-  for (const [path, { file, sha256: sha }] of Object.entries(files)) {
-    post({ id, type: "progress", stage: "verify", file: path });
-    await verified(file, sha, path);          // integridade (o conteúdo é lido de novo abaixo)
-    VFS.set(`${slug}/${path}`, file);
+async function load({ id, slug, files, repo, revision, device, dtype, meta }) {
+  let tok;
+  if (repo) {                                  // hub: tokenizer.json e modelo do Hugging Face
+    const r = await hubFetch(`${HUB.host}${repo}/resolve/${revision}/tokenizer.json`);
+    if (!r.ok) throw new Error(`tokenizer.json: HTTP ${r.status}`);
+    tok = NerCore.createTokenizer(await r.json());
+  } else {
+    for (const [path, { file, sha256: sha }] of Object.entries(files)) {
+      post({ id, type: "progress", stage: "verify", file: path });
+      await verified(file, sha, path);        // integridade (o conteúdo é lido de novo abaixo)
+      VFS.set(`${slug}/${path}`, file);
+    }
+    tok = NerCore.createTokenizer(JSON.parse(await files["tokenizer.json"].file.text()));
   }
-  const tok = NerCore.createTokenizer(JSON.parse(await files["tokenizer.json"].file.text()));
   const t0 = performance.now();
-  const model = await T.AutoModelForTokenClassification.from_pretrained(slug, {
-    device, dtype,
+  const model = await T.AutoModelForTokenClassification.from_pretrained(repo || slug, {
+    device, dtype, ...(repo ? { revision } : {}),
     progress_callback: p => { if (p.status === "progress_total" || p.status === "progress") post({ id, type: "progress", stage: "load", ...p }); },
   });
-  for (const path of Object.keys(files)) VFS.delete(`${slug}/${path}`);
+  for (const path of Object.keys(files || {})) VFS.delete(`${slug}/${path}`);
   const M = { model, tok, device, dtype, id2label: meta.id2label, C: Object.keys(meta.id2label).length,
               maxLength: meta.max_length ?? 512, stride: meta.stride ?? 128, batch: device === "webgpu" ? 4 : 1 };
   MODELS.set(slug, M);
@@ -1105,6 +1140,21 @@ const NER_RUNTIME = {
   "ort-wasm-simd-threaded.asyncify.mjs": "0966b6105cd936744498aa60df7a22cbd47af3374dbc64a9ab561c08a71e3611",
   "ort-wasm-simd-threaded.asyncify.wasm": "49871f5a4409519797e127440868a6d1923339d9185907f301a5b2a1d90af082",
 };
+// mesmos arquivos, servidos pelo jsDelivr (byte a byte iguais aos do npm; conferidos acima)
+const NER_CDN = {
+  "transformers.min.js": "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0/dist/transformers.min.js",
+  "ort-wasm-simd-threaded.asyncify.mjs": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.0-dev.20260914-8d85527a0/dist/ort-wasm-simd-threaded.asyncify.mjs",
+  "ort-wasm-simd-threaded.asyncify.wasm": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.0-dev.20260914-8d85527a0/dist/ort-wasm-simd-threaded.asyncify.wasm",
+};
+// Modelos no Hugging Face: ONNX gerado por tools/build_ner_pack.py e publicado por
+// tools/publish_hub.py. Fixar "revision" num commit garante que o arquivo não muda.
+const NER_HUB = {
+  host: "https://huggingface.co/",
+  models: [
+    {repo:"LuizPF42/legal-bert-lgpd-onnx", revision:"main"},
+    {repo:"LuizPF42/ner-harem-base-onnx",  revision:"main"},
+  ],
+};
 // ordem de preferência das variantes ONNX por dispositivo
 const DTYPE_ORDER = { "webgpu-f16":["fp16","q4f16","fp32","q4","q8"], webgpu:["fp32","q4","q8"], wasm:["q8","q4","fp32"] };
 
@@ -1128,9 +1178,9 @@ const NER = (() => {
       if(type==="run") L.runs.add(id);
       return new Promise((resolve,reject)=>{ L.pending.set(id,{resolve,reject,onProgress}); L.worker.postMessage({id,type,...payload}); });
     };
-    const runtime={};
-    for(const name of Object.keys(NER_RUNTIME)) runtime[name]=pack.files.get("runtime/"+name);
-    L.ready=L.call("init",{runtime,trusted:NER_RUNTIME});
+    const hub=pack.mode==="hub", runtime={};
+    for(const name of Object.keys(NER_RUNTIME)) runtime[name] = hub ? NER_CDN[name] : pack.files.get("runtime/"+name);
+    L.ready=L.call("init",{runtime, trusted:NER_RUNTIME, hub: hub ? {host:pack.host} : null});
     lanes.push(L);
     return L;
   }
@@ -1189,7 +1239,24 @@ const NER = (() => {
     }
     if(!list.length) throw new Error("o pacote não tem nenhum modelo");
     reset();
-    pack={files, manifest, list};
+    pack={mode:"pack", files, manifest, list};
+    return list;
+  }
+
+  /** Lista os modelos publicados no Hugging Face (só o manifesto; nada pesado ainda). */
+  async function openHub(hub){
+    const list=[], missing=[];
+    for(const m of hub.models){
+      try{
+        const r=await fetch(`${hub.host}${m.repo}/resolve/${m.revision}/anonlab-model.json`,{credentials:"omit"});
+        if(!r.ok) throw new Error(r.status===404||r.status===401 ? "não encontrado (ainda não publicado?)" : "HTTP "+r.status);
+        const meta=await r.json();
+        list.push({slug:meta.slug||m.repo.split("/")[1], repo:m.repo, revision:m.revision, meta});
+      }catch(e){ missing.push(`${m.repo}: ${e.message}`); }
+    }
+    if(!list.length) throw new Error("nenhum modelo disponível no Hugging Face — "+missing.join("; "));
+    reset();
+    pack={mode:"hub", host:hub.host, list, missing};
     return list;
   }
 
@@ -1204,16 +1271,21 @@ const NER = (() => {
     const dtype = dtypeFor(m.meta, g);
     if(!dtype) throw new Error(device==="webgpu" ? "nenhuma variante do pacote roda nesta GPU (precisa de fp16?)"
                                                  : "este modelo só tem variante para GPU (WebGPU)");
-    const v=m.meta.variants[dtype], files={};
-    for(const [p,info] of Object.entries({...m.meta.files, [v.file]:v})){
-      const f=pack.files.get(m.dir+"/"+p);
-      if(!f) throw new Error("pacote incompleto: falta "+m.dir+"/"+p);
-      if(f.size!==info.size) throw new Error(`${p}: tamanho não confere (cópia incompleta?)`);
-      files[p]={file:f, sha256:info.sha256};
+    const v=m.meta.variants[dtype], meta={id2label:m.meta.id2label, max_length:m.meta.max_length, stride:m.meta.stride};
+    let payload;
+    if(pack.mode==="hub") payload={slug, repo:m.repo, revision:m.revision, device, dtype, meta};
+    else {
+      const files={};
+      for(const [p,info] of Object.entries({...m.meta.files, [v.file]:v})){
+        const f=pack.files.get(m.dir+"/"+p);
+        if(!f) throw new Error("pacote incompleto: falta "+m.dir+"/"+p);
+        if(f.size!==info.size) throw new Error(`${p}: tamanho não confere (cópia incompleta?)`);
+        files[p]={file:f, sha256:info.sha256};
+      }
+      payload={slug, files, device, dtype, meta};
     }
     const state={slug, meta:m.meta, device, dtype, size:v.size, gpu:g, status:"loading", lanes:0};
     models.set(slug,state);
-    const payload={slug, files, device, dtype, meta:{id2label:m.meta.id2label, max_length:m.meta.max_length, stride:m.meta.stride}};
     try{
       const L0=lanes[0]||newLane();
       await L0.ready;
@@ -1281,7 +1353,7 @@ const NER = (() => {
   const where=m=>m.device==="webgpu" ? `GPU${m.gpu?.name?" ("+m.gpu.name+")":""} · WebGPU ${m.dtype}`
     : `CPU · WASM ${m.dtype}${m.lanes>1?` · ${m.lanes} workers em paralelo`:""}`;
   const describe=()=>[...new Set([...models.values()].filter(m=>m.status==="ready").map(where))].join("; ");
-  return {openPack, load, unload, run, cancel, ready, types, describe, where, dtypeFor, gpu:gpuInfo, model:slug=>models.get(slug),
+  return {openPack, openHub, load, unload, run, cancel, ready, types, describe, where, dtypeFor, gpu:gpuInfo, model:slug=>models.get(slug),
           loaded:()=>[...models.values()].filter(m=>m.status==="ready"), get pack(){ return pack; }};
 })();
 
@@ -1302,17 +1374,26 @@ function busy(on,label){
 }
 
 const NER_LOADING=new Set();   // pacote/modelos carregando (o Detectar espera por eles)
-function openNerPack(entries){
-  const p=openNerPackNow(entries);
-  NER_LOADING.add(p); p.finally(()=>NER_LOADING.delete(p));
-  return p;
-}
+const tracked=p=>{ NER_LOADING.add(p); p.finally(()=>NER_LOADING.delete(p)); return p; };
+function openNerPack(entries){ return tracked(openNerPackNow(entries)); }
 async function openNerPackNow(entries){
   nerStatus("Lendo o pacote…","lendo");
-  let list;
-  try{ list=await NER.openPack(entries); }
+  try{ await NER.openPack(entries); }
   catch(e){ nerStatus("⚠️ "+escHtml(e.message),"erro","bad"); return; }
   await renderNerModels(true);
+}
+// modelos do Hugging Face: baixados uma vez, depois vêm do cache do navegador
+const AUTO_KEY="anonlab.ner.auto";   // "hub" = carregar sozinho ao abrir; "" = não
+const store={ get:k=>{ try{ return localStorage.getItem(k); }catch(_){ return null; } },
+              set:(k,v)=>{ try{ localStorage.setItem(k,v); }catch(_){} } };   // pode não existir (modo privado)
+function openNerHub(){ return tracked(openNerHubNow()); }
+async function openNerHubNow(){
+  nerStatus("Consultando os modelos no Hugging Face…","lendo");
+  try{ await NER.openHub(NER_HUB); }
+  catch(e){ nerStatus("⚠️ "+escHtml(e.message)+"<br>Sem internet? Use <b>pasta local</b>.","erro","bad"); return; }
+  await renderNerModels(true);
+  if(NER.ready()) store.set(AUTO_KEY, $("#ner-auto").checked ? "hub" : "");
+  if(NER.pack.missing?.length) nerReadyStatus(`<span class="warn">Indisponível: ${escHtml(NER.pack.missing.join("; "))}</span>`);
 }
 // lista de modelos do pacote; os que não têm variante para o dispositivo ficam desabilitados.
 // autoLoad: na GPU todos rodam juntos (um cobre o que o outro não tem); na CPU, que é
@@ -1346,9 +1427,16 @@ async function loadNerModelNow(slug){
   nerStatus(`Conferindo integridade e carregando <b>${title}</b>…`,"carregando"); nerBar(0);
   document.querySelectorAll("#ner-models input").forEach(i=>i.disabled=true);
   try{
+    let sawTotal=false;   // com o progresso total disponível, ignora o por-arquivo (a barra não pula)
     const s=await NER.load(slug, $("#ner-device").value, p=>{
+      if(p.status==="progress_total") sawTotal=true; else if(sawTotal) return;
       if(p.stage==="verify") nerStatus(`Conferindo SHA-256 de <code>${escHtml(p.file)}</code>…`,"carregando");
-      else if(p.stage==="load"){ nerStatus(`Carregando <b>${title}</b> na ${$("#ner-device").value==="wasm"?"CPU":"memória"}…`,"carregando"); if(p.total) nerBar(p.loaded/p.total); }
+      else if(p.stage==="load" && p.total){
+        const hub=NER.pack.mode==="hub";
+        nerStatus(`${hub?"Baixando":"Carregando"} <b>${title}</b>: ${fmtMB(p.loaded)} de ${fmtMB(p.total)}`
+          +(hub?"<br><span class=\"m\">Só da primeira vez: depois o navegador guarda o modelo. O seu texto não é enviado.</span>":""),"carregando");
+        nerBar(p.loaded/p.total);
+      }
     });
     nerReadyStatus(s.fallback?`<span class="warn">A GPU recusou o modelo (${escHtml(s.fallback)}); usando a CPU, que é mais lenta.</span>`:"");
   }catch(e){
@@ -1409,6 +1497,10 @@ $("#sel-high").addEventListener("click",()=>{ ENTITIES.forEach(e=>e.accepted=e.c
 $("#sel-names").addEventListener("click",()=>{ ENTITIES.forEach(e=>{ if(e.prefix==="PESSOA") e.accepted=true; }); renderReview(); apply(); });
 document.querySelectorAll('input[name=mode]').forEach(r=>r.addEventListener("change",apply));
 
+$("#ner-hub").addEventListener("click",()=>openNerHub());
+$("#ner-auto").addEventListener("change",e=>{
+  store.set(AUTO_KEY, e.target.checked && NER.pack?.mode==="hub" && NER.ready() ? "hub" : e.target.checked ? "?" : "");
+});
 $("#ner-open").addEventListener("click",()=>$("#ner-dir").click());
 $("#ner-dir").addEventListener("change",e=>{
   const entries=[...e.target.files].map(f=>({path:f.webkitRelativePath||f.name, file:f}));
@@ -1445,8 +1537,12 @@ Luíza, a vizinha, mora na Rua das Flores, nº 120, bairro Boa Viagem. Segundo J
 
 /* init */
 buildCategories();
+// "carregar sozinho": marcado por padrão; depois do 1º download, abre já carregando do cache
+{ const auto=store.get(AUTO_KEY);
+  $("#ner-auto").checked = auto!=="";
+  if(auto==="hub") openNerHub(); }
 // para os testes automatizados (tests/harness.html); não expõe nada para fora da página
-window.AnonLab = {NER, NerCore, detect, openNerPack, loadNerModel, entities:()=>ENTITIES};
+window.AnonLab = {NER, NerCore, NER_HUB, detect, openNerPack, openNerHub, loadNerModel, entities:()=>ENTITIES};
 </script>
 </body>
 </html>

@@ -1,9 +1,9 @@
-# Anonimizador de Documentos (airgapped)
+# Anonimizador de Documentos (o texto não sai do navegador)
 
-Ferramenta **local, offline e sem instalador** para ajudar pesquisadores a
+Ferramenta **no navegador e sem instalador** para ajudar pesquisadores a
 de-identificar documentos (entrevistas, prontuários, autos, transcrições, etc.)
 antes de compartilhar ou analisar. Pensada para o contexto brasileiro (LGPD,
-CPF/CNPJ/CNS, etc.).
+CPF/CNPJ/CNS, etc.). **Experimental, sem garantia** (aviso no README e no app).
 
 > Status: **especificação + v1** (`anonimizador.html`), com NER opcional por
 > modelo BERTimbau (transformers.js + WebGPU, seção 2.1).
@@ -14,17 +14,20 @@ CPF/CNPJ/CNS, etc.).
 
 ## 1. Princípios (não-negociáveis)
 
-1. **Airgapped de verdade.** Zero requisições de rede. Nada de CDN, fontes
-   externas, analytics, telemetria. Tudo embutido em um único arquivo. O dado
-   do pesquisador **nunca sai da máquina**. Uma CSP no próprio HTML faz o
-   navegador *impor* isso (inclusive ao worker do modelo).
-2. **Sem instalador.** Um único `anonimizador.html`. Abre com duplo clique em
-   qualquer navegador moderno (funciona via `file://`). Nada de Python, Node,
-   build, servidor. Única exceção, e opcional: o **pacote NER** (modelo de
-   ~1 GB, grande demais para caber no HTML) é uma pasta local que o
-   pesquisador seleciona. Continua offline, sem instalação, e o HTML funciona
-   completo sem ela. Gerar o pacote exige Python, mas numa máquina de build
-   com internet, uma única vez (`tools/build_ner_pack.py`).
+1. **O dado nunca sai do navegador.** O modelo vem até o navegador; o texto
+   não vai a modelo nenhum. Todo o processamento é local, e nenhum servidor
+   recebe o documento. A rede só serve para *baixar* arquivos estáticos: o
+   runtime (jsDelivr, conferido por SHA-256) e os modelos (Hugging Face,
+   revisão fixa). Sem analytics, telemetria, fontes ou imagens externas. Uma
+   CSP no próprio HTML limita as conexões a esses dois hosts, inclusive no
+   worker do modelo. (Até a v1 o princípio era "airgapped": zero rede. Mudou
+   para facilitar o uso, e o modo offline continua existindo; veja o 2.)
+2. **Sem instalador.** Um único `anonimizador.html`. Abre pelo GitHub Pages ou
+   com duplo clique (`file://`). Nada de Python, Node, build, servidor para
+   quem usa. **Modo offline** opcional: o pacote NER (`tools/build_ner_pack.py`)
+   é uma pasta local que o pesquisador seleciona, e nada é baixado. Gerar e
+   publicar os modelos exige Python, uma vez, na máquina de quem mantém o
+   projeto.
 3. **Pesquisador no controle.** A ferramenta **sugere**; a pessoa **decide**.
    Nada é removido automaticamente sem revisão (exceto, opcionalmente, padrões
    de altíssima confiança como CPF validado).
@@ -43,17 +46,31 @@ CPF/CNPJ/CNS, etc.).
   (`<input type=file>` + `FileReader`) — tudo client-side.
 - Saída por **copiar** ou **baixar** (`Blob` + âncora `download`).
 - Fonte: *system font stack* (sem webfont). Cores e ícones inline (SVG/emoji).
-- Sem `fetch`/`XMLHttpRequest`/`import` remoto. Dá pra auditar com um Ctrl+F por
-  `http`/`fetch` no arquivo — não deve haver nenhum externo.
+- As únicas requisições de rede são os GETs do modelo NER opcional (seção
+  2.1). Auditoria: `NER_CDN` e `NER_HUB` no HTML listam tudo o que pode ser
+  baixado, e a CSP (`connect-src`) impõe isso.
 
 ### Por que navegador e não .exe?
 - Sem instalador, sem antivírus reclamando de binário, multiplataforma
   (Windows/Mac/Linux), auditável (é texto), e o sandbox do navegador é uma
   garantia extra de que nada vaza.
 
-### 2.1 Modelo de linguagem (NER) — pacote opcional
+### 2.1 Modelo de linguagem (NER) — opcional
 
-**Pacote** (`dist/anonlab-ner/`, gerado por `tools/build_ner_pack.py`):
+**Dois modos**, mesmo worker e mesma verificação:
+
+- **Baixar (padrão, "🌐 Baixar modelos"):** o runtime vem do jsDelivr
+  (`NER_CDN`, os mesmos bytes do npm, conferidos por SHA-256) e os modelos do
+  Hugging Face (`NER_HUB`: `<usuário>/<slug>-onnx` numa revisão fixa, publicado
+  por `tools/publish_hub.py`). O transformers.js guarda os modelos no Cache API
+  do navegador, e da segunda vez nada é baixado. "Carregar sozinho ao abrir"
+  (localStorage) vem marcado. O `env.fetch` só aceita o host do hub; os
+  redirecionamentos para a CDN do Hugging Face (`*.hf.co`) o navegador segue
+  sozinho.
+- **Pasta local (offline):** o pacote abaixo, selecionado pelo pesquisador.
+
+**Pacote** (`dist/anonlab-ner/`, gerado por `tools/build_ner_pack.py`; é também
+a fonte do que o `publish_hub.py` envia):
 
 ```
 anonlab-ner.json          manifesto: versões e SHA-256 de cada arquivo
@@ -69,15 +86,17 @@ models/<slug>/            anonlab-model.json (rótulos, label_map, variantes, va
   HTML** (a raiz de confiança é o HTML, não o pacote), e importa o
   transformers.js de um blob:. Os arquivos do modelo são conferidos contra o
   manifesto (tamanho e SHA-256).
-- O `env.fetch` do transformers.js é substituído por um "sistema de arquivos"
-  em memória: só entrega arquivos do pacote, e o resto recebe 404 sem sair
-  da máquina. `allowRemoteModels=false`, caches desligados, `wasmBinary` e
-  `wasmPaths.mjs` apontam para os blobs verificados.
+- No modo pasta, o `env.fetch` do transformers.js é substituído por um
+  "sistema de arquivos" em memória: só entrega arquivos do pacote, e o resto
+  recebe 404 sem sair da máquina. `allowRemoteModels=false` e caches
+  desligados. Nos dois modos, `wasmBinary` e `wasmPaths.mjs` apontam para os
+  blobs verificados.
 - **Dispositivo:** WebGPU quando disponível. fp16 exige `shader-f16`; sem ele,
   usa q4 ou fp32. A CPU (WASM) é o fallback automático se a GPU recusar.
-  Em `file://` não há `SharedArrayBuffer`, então o WASM roda numa thread; por
-  isso a CPU usa **várias pistas** (2 a 4 workers, cada um com uma cópia do
-  modelo) e divide o texto em trechos cortados em quebra de linha.
+  Sem isolamento de origem não há `SharedArrayBuffer`: em `file://` e no
+  GitHub Pages, que não manda COOP/COEP, o WASM roda numa thread. Por isso a
+  CPU usa **várias pistas** (2 a 4 workers, cada um com uma cópia do modelo) e
+  divide o texto em trechos cortados em quebra de linha.
 - O pipeline de NER do transformers.js não dá offsets e trunca em 512 tokens.
   Por isso o AnonLab tem o próprio **tokenizador BERT com offsets**
   (`<script id="ner-core">`), **janelas** de 512 tokens com sobreposição de
@@ -85,8 +104,14 @@ models/<slug>/            anonlab-model.json (rótulos, label_map, variantes, va
   "first"** do HF. O transformers.js só roda o modelo. O `ner-core` é testado
   contra vetores gerados em Python (`tests/test_ner_core.mjs`).
 - **CSP** do HTML: `default-src 'none'; script-src 'unsafe-inline' blob:
-  'wasm-unsafe-eval'; worker-src blob:; connect-src blob: data:`. Não precisou
-  de `'unsafe-eval'`.
+  'wasm-unsafe-eval'; worker-src blob:; connect-src 'self' blob: data:
+  https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co
+  https://*.hf.co`. Código só executa se for inline ou blob: (o runtime baixado
+  só vira blob: depois do SHA-256). Não precisou de `'unsafe-eval'`. O `'self'`
+  serve aos testes com o Hugging Face falso (`tests/fake_hf.py`).
+- **Não aceitar** repositório ou host de modelo vindo da URL (`?modelo=`):
+  qualquer pessoa pode publicar no Hugging Face, e um link malicioso poderia
+  trocar o modelo por um que "não vê" nomes.
 - **Vários modelos** rodam juntos e as entidades se somam. O pacote padrão tem
   `legal-bert-lgpd` (dados pessoais; não tem ORGANIZACAO/LOCAL) e HAREM Base
   (geral; tem ORGANIZACAO/LOCAL). Na GPU os dois carregam sozinhos; na CPU, só
@@ -361,9 +386,11 @@ Manter o princípio: qualquer lib usada é **embutida** no arquivo (ainda offlin
     quase-identificadores.
 - **v2:** `.docx` (in/out preservando formatação básica); `.csv` por coluna;
   perfis salvos (export/import de config como JSON, ainda offline).
+- **v1.1 (feito):** modelos baixados do Hugging Face no próprio navegador
+  (runtime do jsDelivr com SHA-256, cache do navegador, carregar sozinho);
+  `tools/publish_hub.py`; aviso de software experimental.
 - **v3 (avaliar):** modelo Base destilado do legal-bert-lgpd (3× mais rápido
-  na CPU); lista de nomes do IBGE como gazetteer; pacote publicado em GitHub
-  Releases.
+  na CPU); lista de nomes do IBGE como gazetteer.
 
 ---
 
@@ -378,9 +405,9 @@ Manter o princípio: qualquer lib usada é **embutida** no arquivo (ainda offlin
 6. **Modelos NER padrão**: hoje `legal-bert-lgpd` + HAREM Base. Na CPU só o
    LGPD roda (o HAREM não tem variante quantizada aprovada). Vale incluir o
    HAREM em fp32 (416 MB) para a CPU, ou destilar um modelo Base próprio?
-7. **Distribuição do pacote** (~1 GB): cada equipe gera o seu, ou publicamos
-   um zip nas Releases do GitHub? (Checar licenças: legal-bert-lgpd e HAREM
-   são MIT; os modelos LeNER-Br do pierreguillou não declaram licença.)
+7. **Distribuição dos modelos:** resolvida pelo Hugging Face (`publish_hub.py`).
+   Licenças: legal-bert-lgpd e HAREM são MIT; os modelos LeNER-Br do
+   pierreguillou não declaram licença, e o script não os publica.
 
 ---
 

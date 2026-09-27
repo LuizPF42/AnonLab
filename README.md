@@ -36,16 +36,22 @@ de nomes e os seus termos livres.
 
 ## Modelo de linguagem (NER, opcional)
 
-Com o **pacote NER**, a detecção passa a usar um modelo BERTimbau que entende o
-contexto. Ele acha nomes no começo de frase ou em minúsculas, endereços
-("Rua das Flores, nº 120", "Jardim Esmeralda"), datas por extenso e outros
-dados que as regras não pegam. Tudo o que o modelo acha num lugar é procurado
-também no resto do texto, para nenhuma ocorrência escapar.
+Com um modelo BERTimbau, a detecção passa a entender o contexto. Ele acha nomes
+no começo de frase ou em minúsculas, endereços ("Rua das Flores, nº 120",
+"Jardim Esmeralda"), datas por extenso e outros dados que as regras não pegam.
+Tudo o que o modelo acha num lugar é procurado também no resto do texto, para
+nenhuma ocorrência escapar.
 
-O modelo roda **no próprio computador**, pelo [transformers.js](https://github.com/huggingface/transformers.js)
-com onnxruntime-web: na **GPU via WebGPU** ou, se não houver, na **CPU via WebAssembly**.
+**O modelo vem até o navegador; o texto não vai a lugar nenhum.** No cartão
+"Modelo de linguagem", clique em **🌐 Baixar modelos**. O navegador baixa os
+modelos do Hugging Face uma vez (~850 MB na GPU, ~310 MB na CPU) e guarda para
+as próximas visitas. A opção "carregar sozinho ao abrir" já vem marcada. O
+modelo roda **no próprio computador**, pelo
+[transformers.js](https://github.com/huggingface/transformers.js) com
+onnxruntime-web: na **GPU via WebGPU** ou, se não houver, na **CPU via
+WebAssembly**.
 
-O pacote padrão traz dois modelos, que rodam juntos na GPU:
+Por padrão rodam dois modelos juntos na GPU:
 
 | modelo | acha | GPU (WebGPU) | CPU (WASM) |
 |---|---|---|---|
@@ -73,22 +79,27 @@ pós-processamento. Valem como teste de regressão, não como benchmark.
   menos de 1 s. Na CPU, ~12 s por janela por thread, com até 4 workers em
   paralelo; é lenta para documentos longos.
 
-### Obter o pacote
+### De onde vêm os modelos
 
-> Hoje o modelo vem de uma **pasta local** (o "pacote NER"). O próximo passo é
-> baixar os modelos direto do Hugging Face, no próprio navegador, sem precisar
-> montar o pacote. O texto continua sem sair da máquina. A pasta local seguirá
-> disponível para quem precisar trabalhar sem internet.
-
-O pacote é gerado **uma vez**, numa máquina com internet, e pode ser copiado
-(pendrive, rede interna…) para outras máquinas:
+Os modelos originais do Hugging Face estão em PyTorch. O navegador precisa deles
+em ONNX, então o projeto os converte e publica:
 
 ```bash
-uv run tools/build_ner_pack.py
+uv run tools/build_ner_pack.py                           # converte e valida → dist/anonlab-ner/ (~1,2 GB)
+hf auth login                                            # uma vez, token com escrita
+uv run tools/publish_hub.py --user SEU_USUARIO_HF        # publica <usuário>/<modelo>-onnx
 ```
 
-Isso cria `dist/anonlab-ner/` (~1,2 GB). No anonimizador, clique em **Carregar
-pacote NER** e selecione essa pasta, ou arraste a pasta para o cartão.
+O `publish_hub.py` cria um repositório por modelo, com um model card que
+credita o original, e fixa no `anonimizador.html` (`NER_HUB`) o commit
+publicado. Assim o navegador baixa sempre exatamente aqueles arquivos. Ele se
+recusa a publicar derivados de modelos sem licença declarada.
+
+### Modo offline (pasta local)
+
+Para trabalhar sem internet, a mesma pasta `dist/anonlab-ner/` pode ser
+copiada (pendrive, rede interna…) e aberta pelo botão **📦 pasta local**, ou
+arrastada para o cartão. Nesse modo nada é baixado.
 
 Outros modelos (é possível pôr vários no mesmo pacote e usá-los juntos):
 
@@ -110,15 +121,20 @@ divergir além do limite (`MIN_ENTITY_F1` no script).
 ### Privacidade: o texto não sai do navegador
 
 - Todo o processamento (regras, listas e modelo) acontece **na sua máquina**.
-  Nenhum servidor recebe o documento.
-- A página tem uma **Content-Security-Policy** que restringe as conexões. Na
-  versão atual, com o pacote local, ela bloqueia *qualquer* acesso à rede
-  (`connect-src blob: data:`), inclusive no worker do modelo.
-- O transformers.js recebe um `fetch` próprio, que só entrega arquivos do
-  pacote. Qualquer outro endereço recebe 404 sem sair da máquina.
-- O runtime (JS e WASM) **só é executado se o SHA-256 bater** com os valores
-  fixados no `anonimizador.html` (`NER_RUNTIME`). Os arquivos do modelo são
-  conferidos contra o manifesto do pacote.
+  Nenhum servidor recebe o documento. A rede só é usada para *baixar* o modelo.
+- A página tem uma **Content-Security-Policy** que só permite conexões com o
+  jsDelivr (runtime) e o Hugging Face (modelos), inclusive no worker do
+  modelo. Não há analytics, fontes ou imagens externas.
+- O runtime (transformers.js + onnxruntime-web, 27 MB) **só é executado se o
+  SHA-256 bater** com os valores fixados no `anonimizador.html`
+  (`NER_RUNTIME`). Os modelos vêm de uma revisão fixa do repositório no Hugging
+  Face.
+- O transformers.js recebe um `fetch` próprio, que só busca no host dos
+  modelos (ou só na pasta, no modo offline). Qualquer outro endereço recebe 404
+  sem sair da máquina.
+- A versão no GitHub Pages carrega o código do GitHub a cada visita. Quem quiser
+  fixar e auditar exatamente o que roda pode baixar o `anonimizador.html` e
+  abrir localmente.
 
 ## Testes
 
@@ -130,18 +146,21 @@ node tests/test_ner_core.mjs          # tokenizador, janelas e agregação vs. P
 tokenizador e o modelo originais.
 
 Os testes no navegador usam `tests/harness.html`, que carrega o anonimizador
-num iframe e injeta o pacote (a CSP do anonimizador bloqueia até o localhost):
+num iframe. O `tests/fake_hf.py` serve o repositório e imita o Hugging Face em
+`/fakehf/`, a partir de `dist/anonlab-ner/`, para testar o download antes de
+publicar:
 
 ```bash
-python -m http.server 8765
+python tests/fake_hf.py 8765
 ```
 
 Abra `http://localhost:8765/tests/harness.html` e, no console:
 
 ```js
-await harness.evalGolden()                                            // vazamento sem modelo
-await harness.app().openNerPack(await harness.loadPack(undefined, ["fp16"]))
-await harness.evalGolden()                                            // vazamento com modelos
+await harness.evalGolden()                     // vazamento sem modelo
+await harness.openFakeHub()                    // "🌐 Baixar modelos" contra o HF falso
+await harness.evalGolden()                     // vazamento com os modelos
+// ou o modo offline: await harness.app().openNerPack(await harness.loadPack(undefined, ["fp16"]))
 ```
 
 ## Desenho
