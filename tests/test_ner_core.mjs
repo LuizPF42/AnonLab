@@ -3,7 +3,13 @@
 //
 //   node tests/test_ner_core.mjs [--pack dist/anonlab-ner] [--core arquivo.js]
 //
-// Vetores: uv run tools/build_ner_pack.py --vectors tests/vectors [--vectors-only]
+// Vetores:
+//   tests/vectors/<slug>.json  tokenização + janelas + agregação dos modelos do pacote
+//                              (uv run tools/build_ner_pack.py --vectors tests/vectors);
+//                              pulados se o pacote local não existir
+//   tests/vectors/tok-*.json   só tokenização, para os modelos padrão do Hugging Face
+//                              (uv run tools/tokenizer_vectors.py REPO REVISAO); o
+//                              tokenizer.json é baixado da revisão fixa para tests/.cache/
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
@@ -50,8 +56,16 @@ const fail = (msg) => { fails++; if (fails <= 25) console.error("  ✗ " + msg);
 for (const f of files) {
   const vec = JSON.parse(fs.readFileSync(path.join(vecDir, f), "utf8"));
   const slug = f.replace(/\.json$/, "");
-  const tokPath = path.join(PACK, "models", slug, "tokenizer.json");
-  if (!fs.existsSync(tokPath)) { console.error(`sem ${tokPath} — gere o pacote antes`); process.exit(2); }
+  let tokPath = path.join(PACK, "models", slug, "tokenizer.json");
+  if (vec.tokenizer_url) {                     // modelo do Hugging Face: baixa uma vez para o cache
+    tokPath = path.join(ROOT, "tests", ".cache", slug + ".tokenizer.json");
+    if (!fs.existsSync(tokPath)) {
+      const r = await fetch(vec.tokenizer_url);
+      if (!r.ok) { console.error(`${slug}: não consegui baixar ${vec.tokenizer_url} (${r.status})`); process.exit(2); }
+      fs.mkdirSync(path.dirname(tokPath), { recursive: true });
+      fs.writeFileSync(tokPath, Buffer.from(await r.arrayBuffer()));
+    }
+  } else if (!fs.existsSync(tokPath)) { console.log(`${slug}: pulado (sem o pacote local em ${PACK})`); continue; }
   const tok = NerCore.createTokenizer(JSON.parse(fs.readFileSync(tokPath, "utf8")));
   const id2label = vec.id2label;
   console.log(`${slug}: ${vec.cases.length} casos (${vec.model} @ ${vec.revision.slice(0, 8)})`);

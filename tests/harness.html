@@ -56,15 +56,25 @@ async function evalGolden(){
     await w.AnonLab.detect();
     const out = d.getElementById("output").value;
     const leaks = doc.pii.filter(p => found(out, p.text));
-    const partial = doc.pii.filter(p => !leaks.includes(p) && parts(p).some(t => found(out, t)));
+    // um pedaço só conta se, no original, ele aparece apenas dentro de dados pessoais
+    // (o "2023" de "Ofício nº 245/2023" não é vazamento da data "7 de novembro de 2023")
+    const occ = (hay, t) => (hay.match(new RegExp("(?<![\\p{L}\\p{N}])" + esc(t) + "(?![\\p{L}\\p{N}])", "gu")) || []).length;
+    const onlyInPii = t => occ(doc.text, t) <= doc.pii.reduce((a, q) => a + occ(q.text, t) * occ(doc.text, q.text), 0);
+    const partial = doc.pii.filter(p => !leaks.includes(p) && parts(p).some(t => onlyInPii(t) && found(out, t)));
     res.push({ id: doc.id, pii: doc.pii.length, vazou: leaks.length, parcial: partial.length,
                vazamentos: leaks.map(p => p.tipo + ": " + p.text),
-               parciais: partial.map(p => p.tipo + ": " + p.text + " → sobrou " + parts(p).filter(t => found(out, t)).join(", ")),
+               parciais: partial.map(p => p.tipo + ": " + p.text + " → sobrou " + parts(p).filter(t => onlyInPii(t) && found(out, t)).join(", ")),
                excesso: doc.fp_ok.filter(t => !out.includes(t)),
                aceitos: w.AnonLab.entities().filter(e => e.accepted).length, saida: out });
   }
-  const tot = res.reduce((a, r) => ({ pii: a.pii + r.pii, vazou: a.vazou + r.vazou, parcial: a.parcial + r.parcial }), { pii: 0, vazou: 0, parcial: 0 });
-  return { recall: +(1 - tot.vazou / tot.pii).toFixed(3), recall_estrito: +(1 - (tot.vazou + tot.parcial) / tot.pii).toFixed(3), ...tot, docs: res };
+  const sum = rs => {
+    const t = rs.reduce((a, r) => ({ pii: a.pii + r.pii, vazou: a.vazou + r.vazou, parcial: a.parcial + r.parcial, excesso: a.excesso + r.excesso.length }),
+                        { pii: 0, vazou: 0, parcial: 0, excesso: 0 });
+    return { recall: +(1 - t.vazou / t.pii).toFixed(3), recall_estrito: +(1 - (t.vazou + t.parcial) / t.pii).toFixed(3), ...t };
+  };
+  // "novos": documentos escritos depois dos ajustes de pós-processamento (comparação mais justa)
+  const novos = new Set(docs.filter(x => x.novo).map(x => x.id));
+  return { ...sum(res), antigos: sum(res.filter(r => !novos.has(r.id))), novos: sum(res.filter(r => novos.has(r.id))), docs: res };
 }
 
 // modo "🌐 Baixar modelos" contra o Hugging Face falso de tests/fake_hf.py
@@ -74,7 +84,24 @@ async function openFakeHub(){
   await A.openNerHub();
 }
 
-window.harness = { loadPack, evalGolden, openFakeHub, app: () => document.getElementById("app").contentWindow,
+// avalia um catálogo qualquer (formato do NER_HUB) pelo mesmo caminho do botão "Baixar modelos"
+async function evalHub(models, host = "https://huggingface.co/"){
+  const A = document.getElementById("app").contentWindow.AnonLab;
+  A.NER_HUB.host = host;
+  A.NER_HUB.models = models;
+  const t0 = performance.now();
+  await A.openNerHub();
+  const loadMs = Math.round(performance.now() - t0);
+  const loaded = A.NER.loaded().map(m => `${m.slug}:${m.dtype}`);
+  const t1 = performance.now();
+  const r = await evalGolden();
+  const brief = x => ({ recall: x.recall, estrito: x.recall_estrito, vazou: x.vazou, parcial: x.parcial, excesso: x.excesso, pii: x.pii });
+  return { loaded, loadMs, detectMs: Math.round(performance.now() - t1), total: brief(r), antigos: brief(r.antigos), novos: brief(r.novos),
+           vazamentos: r.docs.flatMap(d => d.vazamentos.concat(d.parciais).map(v => d.id + " · " + v)),
+           excessos: r.docs.flatMap(d => d.excesso.map(v => d.id + " · " + v)) };
+}
+
+window.harness = { loadPack, evalGolden, openFakeHub, evalHub, app: () => document.getElementById("app").contentWindow,
                    doc: () => document.getElementById("app").contentDocument };
 </script>
 </body>

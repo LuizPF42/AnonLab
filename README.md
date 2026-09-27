@@ -36,7 +36,8 @@ de nomes e os seus termos livres.
 
 ## Modelo de linguagem (NER, opcional)
 
-Com um modelo BERTimbau, a detecção passa a entender o contexto. Ele acha nomes
+Com um modelo de linguagem (BERT treinado para reconhecer entidades), a
+detecção passa a entender o contexto. Ele acha nomes
 no começo de frase ou em minúsculas, endereços ("Rua das Flores, nº 120",
 "Jardim Esmeralda"), datas por extenso e outros dados que as regras não pegam.
 Tudo o que o modelo acha num lugar é procurado também no resto do texto, para
@@ -44,45 +45,58 @@ nenhuma ocorrência escapar.
 
 **O modelo vem até o navegador; o texto não vai a lugar nenhum.** No cartão
 "Modelo de linguagem", clique em **🌐 Baixar modelos**. O navegador baixa os
-modelos do Hugging Face uma vez (~850 MB na GPU, ~310 MB na CPU) e guarda para
-as próximas visitas. A opção "carregar sozinho ao abrir" já vem marcada. O
-modelo roda **no próprio computador**, pelo
+modelos do Hugging Face uma vez (~490 MB na GPU, ~970 MB na CPU) e guarda para
+as próximas visitas. A opção "carregar sozinho ao abrir" já vem marcada. Não é
+preciso conta em lugar nenhum: são modelos que outras pessoas já publicaram em
+ONNX (o mesmo esquema do QualiLab com o modelo do Xenova). O modelo roda **no
+próprio computador**, pelo
 [transformers.js](https://github.com/huggingface/transformers.js) com
 onnxruntime-web: na **GPU via WebGPU** ou, se não houver, na **CPU via
 WebAssembly**.
 
-Por padrão rodam dois modelos juntos na GPU:
+Por padrão rodam dois modelos juntos:
 
-| modelo | acha | GPU (WebGPU) | CPU (WASM) |
+| modelo | acha | licença | GPU (WebGPU) | CPU (WASM) |
+|---|---|---|---|---|
+| [`dominguesm/legal-bert-ner-base-cased-ptbr`](https://huggingface.co/dominguesm/legal-bert-ner-base-cased-ptbr), em ONNX por [`augustaklug`](https://huggingface.co/augustaklug/legal-bert-ner-base-cased-ptbr-onnx) | pessoas, organizações, locais, datas (BERT jurídico em português) | CC-BY-4.0 | fp16, 207 MB | fp32, 414 MB |
+| [`OpenMed/OpenMed-PII-Portuguese-mLiteClinical-Base-135M-v1`](https://huggingface.co/OpenMed/OpenMed-PII-Portuguese-mLiteClinical-Base-135M-v1), em ONNX pela própria [OpenMed](https://huggingface.co/OpenMed/OpenMed-PII-Portuguese-mLiteClinical-Base-135M-v1-onnx-android) | dados pessoais: nomes, endereços, documentos, contas, contatos (54 tipos) | Apache-2.0 | fp16, 257 MB | fp32, 514 MB |
+
+**Como foram escolhidos** (RTX 3060, Ryzen 5 5500). Cinco documentos fictícios
+(entrevista, prontuário, petição, diário de campo, ofício de RH), com 90 dados
+pessoais, aceitando só o que já vem marcado. "Vazou" conta também o vazamento
+parcial (sobrou um sobrenome ou um número):
+
+| configuração | vazou (rodada 1) | vazou (rodada 2) | substituições indevidas (rodada 2) |
 |---|---|---|---|
-| [`celiudos/legal-bert-lgpd`](https://huggingface.co/celiudos/legal-bert-lgpd) (BERTimbau Large, MIT) | dados pessoais da LGPD: NOME, ENDERECO, DATA, CPF, TELEFONE, EMAIL, DINHEIRO, CEP | fp16, 638 MB | q4, 306 MB |
-| [`liaad/NER_harem_bert-base-portuguese-cased`](https://huggingface.co/liaad/NER_harem_bert-base-portuguese-cased) (BERTimbau Base, MIT) | domínio geral: PESSOA, **ORGANIZACAO**, **LOCAL**, TEMPO… | fp16, 208 MB | — (as versões quantizadas foram reprovadas) |
+| sem modelo | 59 | 50 | 0 |
+| legal-bert-lgpd + HAREM (convertidos por nós; exigem publicar) | 5 | 0 | 1 |
+| legal-bert-ner (dominguesm) | 10 | 1 | 0 |
+| BERTimbau NER HAREM (NeuralMind), ONNX de rchuluc | 9 | 1 | 1 |
+| mBERT NER multilíngue (Davlan), ONNX do Xenova | 12 | 3 | 1 |
+| OpenMed PII | 25 | 19 | 0 |
+| **legal-bert-ner + OpenMed (padrão)** | **4** | **0** | **0** |
 
-**Resultados medidos** (RTX 3060, Ryzen 5 5500).
+A rodada 2 veio depois de corrigir falhas que independem do modelo e que os
+dois documentos novos revelaram: SIAPE e conta bancária sem detector; `@` de
+rede social desligado; trecho do modelo com confiança baixa passando por cima
+de regras certas; endereço marcado como LOCAL sem o número. Como esses
+documentos ajudaram a achar as falhas, a rodada 2 vale como regressão, não
+como benchmark. Na rodada 1, os dois documentos novos ainda eram inéditos, e
+neles o padrão já ficou à frente: 4 vazamentos, contra 5 do LGPD + HAREM.
 
-*Vazamento* em três documentos fictícios (entrevista, prontuário, petição), com
-54 dados pessoais, aceitando só o que já vem marcado:
+- **Fidelidade** das nossas conversões ao PyTorch fp32 (F1 de entidades, 315
+  textos, ~22 mil tokens): fp16 1,000; q4 0,977. No navegador, a GPU
+  reproduz a referência com F1 0,997 (LGPD) e 0,994 (HAREM). O tokenizador do
+  AnonLab bate 100% com o do Hugging Face nos seis modelos testados.
+- **Velocidade:** na GPU, ~80 ms por janela de 512 tokens (modelo Large), e uma
+  página sai em menos de 1 s. Na CPU, com até 4 workers em paralelo, é bem
+  mais lenta para documentos longos.
 
-| configuração | dados que sobraram no texto |
-|---|---|
-| sem o modelo | 32 de 54 |
-| só o LGPD | 1 de 54 (o nome de uma escola) |
-| LGPD + HAREM | **0 de 54**, sem substituir nada indevido |
+### Outros modelos (convertidos por você)
 
-Os documentos (`tests/golden/docs.json`) foram escritos junto com os ajustes de
-pós-processamento. Valem como teste de regressão, não como benchmark.
-
-- **Fidelidade** ao PyTorch fp32 (F1 de entidades, 315 textos, ~22 mil
-  tokens): fp16 1,000; q4 0,977. No navegador, a GPU reproduz a referência
-  com F1 0,997 (LGPD) e 0,994 (HAREM).
-- **Velocidade:** na GPU, ~80 ms por janela de 512 tokens, e uma página sai em
-  menos de 1 s. Na CPU, ~12 s por janela por thread, com até 4 workers em
-  paralelo; é lenta para documentos longos.
-
-### De onde vêm os modelos
-
-Os modelos originais do Hugging Face estão em PyTorch. O navegador precisa deles
-em ONNX, então o projeto os converte e publica:
+Modelos que só existem em PyTorch, como o
+[`celiudos/legal-bert-lgpd`](https://huggingface.co/celiudos/legal-bert-lgpd),
+podem ser convertidos e usados pela pasta local ou publicados:
 
 ```bash
 uv run tools/build_ner_pack.py                           # converte e valida → dist/anonlab-ner/ (~1,2 GB)
@@ -91,9 +105,10 @@ uv run tools/publish_hub.py --user SEU_USUARIO_HF        # publica <usuário>/<m
 ```
 
 O `publish_hub.py` cria um repositório por modelo, com um model card que
-credita o original, e fixa no `anonimizador.html` (`NER_HUB`) o commit
-publicado. Assim o navegador baixa sempre exatamente aqueles arquivos. Ele se
-recusa a publicar derivados de modelos sem licença declarada.
+credita o original, e acrescenta ao catálogo do `anonimizador.html`
+(`NER_HUB`) o commit publicado. Ele se recusa a publicar derivados de modelos
+sem licença declarada. Atenção: o `legal-bert-lgpd` se declara MIT, mas foi
+treinado a partir de um modelo sem licença (`pierreguillou/ner-bert-large-cased-pt-lenerbr`).
 
 ### Modo offline (pasta local)
 
@@ -142,8 +157,15 @@ divergir além do limite (`MIN_ENTITY_F1` no script).
 node tests/test_ner_core.mjs          # tokenizador, janelas e agregação vs. Python/HF
 ```
 
-`tests/vectors/*.json` é gerado pelo build (`--vectors tests/vectors`) com o
-tokenizador e o modelo originais.
+Os vetores de `tests/vectors/` vêm do Python, com o tokenizador e o modelo
+originais:
+
+- `tok-*.json`: tokenização dos modelos padrão
+  (`uv run tools/tokenizer_vectors.py REPO REVISAO`). O teste baixa o
+  `tokenizer.json` da revisão fixa para `tests/.cache/`.
+- os demais: tokenização, janelas e agregação dos modelos do pacote
+  (`build_ner_pack.py --vectors tests/vectors`), pulados se
+  `dist/anonlab-ner/` não existir.
 
 Os testes no navegador usam `tests/harness.html`, que carrega o anonimizador
 num iframe. O `tests/fake_hf.py` serve o repositório e imita o Hugging Face em
@@ -177,10 +199,14 @@ abaixo pertencem aos seus autores e seguem as próprias licenças.
 
 | modelo | autoria | licença | papel no AnonLab |
 |---|---|---|---|
-| [celiudos/legal-bert-lgpd](https://huggingface.co/celiudos/legal-bert-lgpd) | Marcelo Anselmo de Souza Filho. Dissertação *Inteligência Artificial no MPF: Uma Solução Baseada em IA para Pseudonimização de Dados Pessoais* (UnB, 2025) | MIT | modelo principal (dados pessoais da LGPD) |
-| [liaad/NER_harem_bert-base-portuguese-cased](https://huggingface.co/liaad/NER_harem_bert-base-portuguese-cased) | [LIAAD, INESC TEC](https://huggingface.co/liaad) | MIT | segundo modelo (organizações e locais) |
+| [dominguesm/legal-bert-ner-base-cased-ptbr](https://huggingface.co/dominguesm/legal-bert-ner-base-cased-ptbr) | [dominguesm](https://huggingface.co/dominguesm), treinado com documentos do STF ([projeto VICTOR](https://ailab.unb.br/victor/lrec2020), LREC 2020). Conversão para ONNX: [augustaklug](https://huggingface.co/augustaklug/legal-bert-ner-base-cased-ptbr-onnx), usada sem alterações | CC-BY-4.0 | **padrão**: pessoas, organizações, locais, datas |
+| [OpenMed/OpenMed-PII-Portuguese-mLiteClinical-Base-135M-v1](https://huggingface.co/OpenMed/OpenMed-PII-Portuguese-mLiteClinical-Base-135M-v1) | [OpenMed](https://huggingface.co/OpenMed), a partir do [DistilBERT multilíngue](https://huggingface.co/distilbert/distilbert-base-multilingual-cased), com dados da [AI4Privacy](https://huggingface.co/datasets/ai4privacy/pii-masking-200k) e da NVIDIA (Nemotron-PII). ONNX publicado pela própria OpenMed | Apache-2.0 | **padrão**: dados pessoais (documentos, contas, endereços, contatos) |
+| [celiudos/legal-bert-lgpd](https://huggingface.co/celiudos/legal-bert-lgpd) | Marcelo Anselmo de Souza Filho. Dissertação *Inteligência Artificial no MPF: Uma Solução Baseada em IA para Pseudonimização de Dados Pessoais* (UnB, 2025) | MIT | opcional, convertido por você (dados pessoais da LGPD) |
+| [liaad/NER_harem_bert-base-portuguese-cased](https://huggingface.co/liaad/NER_harem_bert-base-portuguese-cased) | [LIAAD, INESC TEC](https://huggingface.co/liaad) | MIT | opcional, convertido por você (organizações e locais) |
+| [marquesafonso/bertimbau-large-ner-total](https://huggingface.co/marquesafonso/bertimbau-large-ner-total) | BERT-CRF da NeuralMind (HAREM, cenário total), publicado por marquesafonso. ONNX de [rchuluc](https://huggingface.co/rchuluc/bertimbau-large-ner-total-onnx) | MIT | testado na comparação (fora do padrão) |
+| [Davlan/bert-base-multilingual-cased-ner-hrl](https://huggingface.co/Davlan/bert-base-multilingual-cased-ner-hrl) | [Davlan](https://huggingface.co/Davlan). ONNX do [Xenova](https://huggingface.co/Xenova/bert-base-multilingual-cased-ner-hrl) | AFL-3.0 | testado na comparação (fora do padrão) |
 | [pierreguillou/ner-bert-large-cased-pt-lenerbr](https://huggingface.co/pierreguillou/ner-bert-large-cased-pt-lenerbr) | Pierre Guillou | não declarada | base do legal-bert-lgpd; preset `lenerbr` |
-| [neuralmind/bert-base-portuguese-cased](https://huggingface.co/neuralmind/bert-base-portuguese-cased) e [neuralmind/bert-large-portuguese-cased](https://huggingface.co/neuralmind/bert-large-portuguese-cased) (BERTimbau) | Fábio Souza, Rodrigo Nogueira e Roberto Lotufo, NeuralMind ([portuguese-bert](https://github.com/neuralmind-ai/portuguese-bert)) | MIT | base de todos os modelos acima |
+| [neuralmind/bert-base-portuguese-cased](https://huggingface.co/neuralmind/bert-base-portuguese-cased) e [neuralmind/bert-large-portuguese-cased](https://huggingface.co/neuralmind/bert-large-portuguese-cased) (BERTimbau) | Fábio Souza, Rodrigo Nogueira e Roberto Lotufo, NeuralMind ([portuguese-bert](https://github.com/neuralmind-ai/portuguese-bert)) | MIT | base do legal-bert-lgpd, do HAREM do LIAAD e do BERT-CRF da NeuralMind |
 | [rufimelo/Legal-BERTimbau-base](https://huggingface.co/rufimelo/Legal-BERTimbau-base) | Rui Melo | MIT | referência (ainda não usado: é um modelo de base, sem a parte de NER) |
 
 **Software**

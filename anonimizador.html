@@ -115,7 +115,7 @@
   <h1>🛡️ Anonimizador de Documentos</h1>
   <span class="badge exp" title="Protótipo de pesquisa, fornecido sem garantia. Não garante anonimização: revise todo o resultado antes de usar.">⚠️ EXPERIMENTAL · sem garantia</span>
   <span class="badge net" id="netbadge" title="O documento é processado neste navegador e não é enviado a nenhum servidor. Só o modelo é baixado (se você pedir).">● o texto não sai daqui</span>
-  <span class="sub">v1 · arquivo único · sem instalador · NER opcional (BERTimbau)</span>
+  <span class="sub">v1 · arquivo único · sem instalador · NER opcional (BERT)</span>
 </header>
 
 <main>
@@ -154,7 +154,7 @@
           </select>
         </label>
       </div>
-      <p class="note" id="ner-status">Opcional. Com um modelo BERTimbau, a detecção entende o contexto e acha nomes, endereços e outros dados que as regras não pegam. <b>O modelo vem até o navegador; o seu texto não vai a lugar nenhum.</b> O primeiro download é grande (~850 MB na GPU, ~310 MB na CPU) e fica guardado para as próximas vezes.</p>
+      <p class="note" id="ner-status">Opcional. Com um modelo de linguagem (BERT), a detecção entende o contexto e acha nomes, endereços e outros dados que as regras não pegam. <b>O modelo vem até o navegador; o seu texto não vai a lugar nenhum.</b> O primeiro download é grande (~490 MB na GPU, ~970 MB na CPU) e fica guardado para as próximas vezes.</p>
       <div class="bar" id="ner-bar" hidden><i></i></div>
       <div id="ner-models"></div>
       <div class="opt-inline">
@@ -163,7 +163,7 @@
       </div>
       <details class="help">
         <summary>De onde vem o modelo? É seguro?</summary>
-        <p class="note">Os modelos são conversões para ONNX de <a href="https://huggingface.co/celiudos/legal-bert-lgpd" target="_blank" rel="noopener">legal-bert-lgpd</a> e <a href="https://huggingface.co/liaad/NER_harem_bert-base-portuguese-cased" target="_blank" rel="noopener">HAREM (LIAAD)</a>, publicadas no Hugging Face numa revisão fixa. O runtime (transformers.js + onnxruntime-web) vem do jsDelivr e só é executado se o SHA-256 conferir com o fixado neste arquivo. Tudo roda neste computador: GPU via WebGPU ou CPU via WebAssembly. A política de segurança da página só permite conectar a esses dois serviços, e só para baixar arquivos; o documento nunca é enviado. Sem internet? Use <b>pasta local</b> com o pacote gerado por <code>tools/build_ner_pack.py</code> (veja o README).</p>
+        <p class="note">Dois modelos já publicados em ONNX no Hugging Face, numa revisão fixa: <a href="https://huggingface.co/dominguesm/legal-bert-ner-base-cased-ptbr" target="_blank" rel="noopener">legal-bert-ner-base-cased-ptbr</a> (dominguesm, CC-BY-4.0; ONNX de <a href="https://huggingface.co/augustaklug/legal-bert-ner-base-cased-ptbr-onnx" target="_blank" rel="noopener">augustaklug</a>) e <a href="https://huggingface.co/OpenMed/OpenMed-PII-Portuguese-mLiteClinical-Base-135M-v1" target="_blank" rel="noopener">OpenMed PII Portuguese</a> (OpenMed, Apache-2.0). O runtime (transformers.js + onnxruntime-web) vem do jsDelivr e só é executado se o SHA-256 conferir com o fixado neste arquivo. Tudo roda neste computador: GPU via WebGPU ou CPU via WebAssembly. A política de segurança da página só permite conectar a esses dois serviços, e só para baixar arquivos; o documento nunca é enviado. Sem internet? Use <b>pasta local</b> com o pacote gerado por <code>tools/build_ner_pack.py</code> (veja o README).</p>
       </details>
     </div>
 
@@ -182,7 +182,7 @@
 
     <details class="help">
       <summary>Como funciona / privacidade</summary>
-      <p class="note">Cinco camadas: <b>padrões</b> (CPF, e-mail, telefone… com validação de dígito), <b>modelo de linguagem</b> (NER BERTimbau, opcional), <b>listas</b> (estados, capitais, países), <b>heurística de nomes</b> e seus <b>termos livres</b>. O que o modelo acha é procurado no resto do texto, para nenhuma ocorrência escapar. A ferramenta <b>sugere</b>; você decide. Roda 100% no navegador, offline. Veja <code>claude.md</code> para o design completo.</p>
+      <p class="note">Cinco camadas: <b>padrões</b> (CPF, e-mail, telefone… com validação de dígito), <b>modelo de linguagem</b> (NER, opcional), <b>listas</b> (estados, capitais, países), <b>heurística de nomes</b> e seus <b>termos livres</b>. O que o modelo acha é procurado no resto do texto, para nenhuma ocorrência escapar. A ferramenta <b>sugere</b>; você decide. Roda 100% no navegador: a rede só baixa o modelo, e o texto não sai daqui. Veja <code>claude.md</code> para o design completo.</p>
     </details>
   </section>
 
@@ -499,7 +499,7 @@ async function init({ id, runtime, trusted, hub }) {
   post({ id, type: "done", result: { version: env.version } });
 }
 
-async function load({ id, slug, files, repo, revision, device, dtype, meta }) {
+async function load({ id, slug, files, repo, revision, subfolder, device, dtype, meta }) {
   let tok;
   if (repo) {                                  // hub: tokenizer.json e modelo do Hugging Face
     const r = await hubFetch(`${HUB.host}${repo}/resolve/${revision}/tokenizer.json`);
@@ -515,12 +515,15 @@ async function load({ id, slug, files, repo, revision, device, dtype, meta }) {
   }
   const t0 = performance.now();
   const model = await T.AutoModelForTokenClassification.from_pretrained(repo || slug, {
-    device, dtype, ...(repo ? { revision } : {}),
+    device, dtype, ...(repo ? { revision } : {}), ...(subfolder !== undefined ? { subfolder } : {}),
     progress_callback: p => { if (p.status === "progress_total" || p.status === "progress") post({ id, type: "progress", stage: "load", ...p }); },
   });
   for (const path of Object.keys(files || {})) VFS.delete(`${slug}/${path}`);
+  // entradas que a sessão ONNX espera (DistilBERT, p.ex., não tem token_type_ids)
+  const names = Object.values(model.sessions || {})[0]?.inputNames;
   const M = { model, tok, device, dtype, id2label: meta.id2label, C: Object.keys(meta.id2label).length,
-              maxLength: meta.max_length ?? 512, stride: meta.stride ?? 128, batch: device === "webgpu" ? 4 : 1 };
+              maxLength: meta.max_length ?? 512, stride: meta.stride ?? 128, batch: device === "webgpu" ? 4 : 1,
+              inputs: new Set(names || ["input_ids", "attention_mask", "token_type_ids"]) };
   MODELS.set(slug, M);
   const t1 = performance.now();
   await infer(M, [[tok.clsId, tok.sepId]], 64);  // aquecimento (compila shaders na GPU)
@@ -532,11 +535,9 @@ async function infer(M, rows, L) {
   const B = rows.length, n = B * L;
   const ids = new BigInt64Array(n).fill(BigInt(M.tok.padId)), mask = new BigInt64Array(n), tt = new BigInt64Array(n);
   rows.forEach((r, b) => { for (let j = 0; j < r.length; j++) { ids[b * L + j] = BigInt(r[j]); mask[b * L + j] = 1n; } });
-  const out = await M.model({
-    input_ids: new T.Tensor("int64", ids, [B, L]),
-    attention_mask: new T.Tensor("int64", mask, [B, L]),
-    token_type_ids: new T.Tensor("int64", tt, [B, L]),
-  });
+  const feeds = { input_ids: new T.Tensor("int64", ids, [B, L]), attention_mask: new T.Tensor("int64", mask, [B, L]) };
+  if (M.inputs.has("token_type_ids")) feeds.token_type_ids = new T.Tensor("int64", tt, [B, L]);
+  const out = await M.model(feeds);
   return out.logits.data;
 }
 
@@ -654,6 +655,16 @@ function gazRegex(list){
   return new RegExp("(?<![\\p{L}])(?:"+alt+")(?![\\p{L}])","gu");
 }
 
+// "Igreja Batista da Lagoinha", "UNIVERSIDADE FEDERAL DO SUL": palavra-chave + 2 ou mais
+// palavras com inicial maiúscula (com uma só, "Universidade Federal", é genérico demais)
+function institutionRegex(keys){
+  const kw=keys.flatMap(k=>[k,k.toUpperCase()]).sort((a,b)=>b.length-a.length).map(escRe).join("|");
+  // palavra: "Lagoinha", "FEDERAL" ou abreviação curta com ponto ("Dr.", "Sta."); o ponto
+  // de fim de frase ("Teixeira.") não entra, senão emendaria a frase seguinte
+  const word="(?:[ \\t]+(?:d[aeo]s?|D[AEO]S?|e|E)(?=[ \\t]))?[ \\t]+(?:\\p{Lu}\\p{Ll}{0,2}\\.|\\p{Lu}[\\p{L}'-]*)";
+  return new RegExp("(?<![\\p{L}])(?:"+kw+")(?:"+word+"){2,}","gu");
+}
+
 /* ===================== heurística de nomes ===================== */
 const STOP = new Set(["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro","segunda","terça","quarta","quinta","sexta","sábado","domingo","a","o","as","os","um","uma","ele","ela","eles","elas","eu","nós","você","vocês","este","esta","esse","essa","isso","isto","aquele","aquela","quando","onde","como","porque","por","para","mas","então","também","sim","não","sr","sra","srta","dr","dra","senhor","senhora","entrevista","entrevistado","entrevistador","pesquisa","pesquisador","obs","nota","após","antes","durante","segundo","conforme","embora","apesar","portanto","além","ainda","já","hoje","ontem","amanhã",
   "rua","avenida","travessa","alameda","praça","estrada","rodovia","largo","jardim","vila","parque","bairro","conjunto","residencial"]);
@@ -711,6 +722,8 @@ const DETECTORS = [
    find: rx(/\b(?:OAB|CRM|CRO|CRP|CREA|CRF|COREN|CRN|CREFITO|CRESS|CAU|CRC|CRMV)\s*[-/]?\s*(?:[A-Z]{2}\s*)?(?:n[º°o.]?\s*)?[:.-]?\s*\d{1,3}(?:\.?\d{3})*(?:-?[A-Z])?\b/g)},
   {id:"prontuario",label:"Nº de prontuário", group:"Documentos", prefix:"PRONTUARIO", conf:"alta", prec:85, src:"padrão", on:true, sensivel:true,
    find: rx(/(?<=\b[Pp]rontu[áa]rio\s*(?:n[º°o.]?|n[úu]mero)?\s*[:.-]?\s*)\d[\d.\/-]*\d/g)},
+  {id:"siape",label:"Matrícula SIAPE", group:"Documentos", prefix:"SIAPE", conf:"alta", prec:85, src:"padrão", on:true,
+   find: rx(/(?<=\bSIAPE\s*(?:n[º°o.]?\s*)?[:.-]?\s*)\d{5,8}(?!\d)/g)},
   {id:"placa",label:"Placa de veículo", group:"Documentos", prefix:"PLACA", conf:"media", prec:70, src:"padrão", on:true,
    find: rx(/\b[A-Z]{3}-?\d[A-Z0-9]\d{2}\b/g)},
   {id:"titulo",label:"Título de eleitor", group:"Documentos", prefix:"TITULO", conf:"baixa", prec:55, src:"padrão", on:false,
@@ -727,14 +740,16 @@ const DETECTORS = [
    find: rx(/(?<!\d)\d{5}-?\d{3}(?!\d)/g)},
   {id:"url",  label:"URL / site",       group:"Contato", prefix:"URL", conf:"alta", prec:90, src:"padrão", on:true,
    find: rx(/(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s,;]+/gi)},
-  {id:"handle",label:"@ rede social",   group:"Contato", prefix:"REDE", conf:"media", prec:40, src:"padrão", on:false,
-   find: rx(/(?<![\w@])@[A-Za-z0-9_]{2,}\b/g)},
+  {id:"handle",label:"@ rede social",   group:"Contato", prefix:"REDE", conf:"media", prec:40, src:"padrão", on:true,
+   find: rx(/(?<![\w@.])@[A-Za-z0-9_][A-Za-z0-9_.]*[A-Za-z0-9_](?![\w@])/g)},
   {id:"ip",   label:"Endereço IP",      group:"Contato", prefix:"IP", conf:"alta", prec:90, src:"padrão", on:false,
    find: rx(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g)},
 
   // --- financeiro ---
   {id:"cartao",label:"Cartão (Luhn)",   group:"Financeiro", prefix:"CARTAO", conf:"alta", prec:100, src:"padrão", on:true, sensivel:true,
    find: rx(/(?<!\d)(?:\d{4}[\s-]?){3}\d{4}(?!\d)/g, luhn)},
+  {id:"conta",label:"Agência / conta bancária", group:"Financeiro", prefix:"CONTA", conf:"alta", prec:70, src:"padrão", on:true,
+   find: rx(/(?<=\b(?:[Aa]g[êe]ncia|[Aa]g\.|[Cc]onta(?:[ \t]+(?:corrente|poupan[çc]a|sal[áa]rio))?|[Cc]\/[Cc])[ \t]*(?:n[º°o.]?[ \t]*)?[:.-]?[ \t]*)\d{3,13}(?:-[\dXx])?(?![\d-])/g)},
   {id:"valor",label:"Valor em R$",      group:"Financeiro", prefix:"VALOR", conf:"baixa", prec:50, src:"padrão", on:false,
    find: rx(/R\$\s?\d{1,3}(?:\.\d{3})*(?:,\d{2})?/g)},
 
@@ -747,6 +762,10 @@ const DETECTORS = [
    find: rx(gazRegex(PAISES))},
   {id:"bairro",label:"Bairros (Jardim X, Vila Y, bairro Z)", group:"Localização", prefix:"LOCAL", conf:"media", prec:43, src:"heurística", on:true,
    find: rx(/(?<![\p{L}])(?:(?:Jardim|Jd\.|Vila|Vl\.|Parque|Pq\.|Conjunto|Residencial|Recanto|Chácara|Loteamento|Núcleo)[ \t]+(?:d[aeo]s?[ \t]+)?\p{Lu}[\p{Ll}'-]+(?:[ \t](?:d[aeo]s?[ \t])?\p{Lu}[\p{Ll}'-]+)*|(?<=\b[Bb]airro[ \t]+)\p{Lu}[\p{Ll}'-]+(?:[ \t](?:d[aeo]s?[ \t])?\p{Lu}[\p{Ll}'-]+)*)/gu)},
+  {id:"religiao",label:"Instituições religiosas (Igreja X…)", group:"Organizações", prefix:"ORG", conf:"media", prec:42, src:"heurística", on:true, sensivel:true,
+   find: rx(institutionRegex(["Igreja","Paróquia","Templo","Congregação","Capela","Terreiro","Centro Espírita","Mesquita","Sinagoga"]))},
+  {id:"instituicao",label:"Escolas, hospitais, UBS… (com nome)", group:"Organizações", prefix:"ORG", conf:"media", prec:42, src:"heurística", on:true,
+   find: rx(institutionRegex(["Escola","Colégio","Creche","Universidade","Faculdade","Instituto","Hospital","Clínica","UBS","Posto de Saúde","Associação","Fundação","Sindicato","Cooperativa"]))},
 
   // --- pessoas / tempo ---
   {id:"nome", label:"Nomes próprios (heurística)", group:"Pessoas", prefix:"PESSOA", conf:"baixa", prec:20, src:"heurística", on:true,
@@ -774,15 +793,21 @@ const NER_TYPES = {
   CEP:      {label:"CEP",           prec:64, on:true},
   TEL:      {label:"Telefones",     prec:59, on:true},
   EMAIL:    {label:"E-mails",       prec:89, on:true},
+  CONTA:    {label:"Contas bancárias", prec:60, on:true},
   VALOR:    {label:"Valores (R$)",  prec:49, on:false},
   EVENTO:   {label:"Eventos",       prec:30, on:false},
   OBRA:     {label:"Obras",         prec:30, on:false},
 };
-// rótulo do modelo -> tipo (fallback; o anonlab-model.json do pacote traz o seu)
+// rótulo do modelo -> tipo (fallback; o anonlab-model.json do pacote traz o seu).
+// Inclui os rótulos dos modelos de dados pessoais (OpenMed/AI4Privacy: FIRSTNAME, STREET…).
 const NER_LABEL_MAP = {NOME:"PESSOA",PESSOA:"PESSOA",PER:"PESSOA",PERSON:"PESSOA",NAME:"PESSOA",
-  ORGANIZACAO:"ORG",ORG:"ORG",LOCAL:"LOCAL",LOC:"LOCAL",LOCATION:"LOCAL",ENDERECO:"ENDERECO",ADDRESS:"ENDERECO",
-  DATA:"DATA",TEMPO:"DATA",DATE:"DATA",TIME:"DATA",CPF:"CPF",CNPJ:"CNPJ",RG:"RG",CEP:"CEP",ZIPCODE:"CEP",
-  TELEFONE:"TEL",PHONE:"TEL",EMAIL:"EMAIL",DINHEIRO:"VALOR",VALOR:"VALOR",MONEY:"VALOR",
+  FIRSTNAME:"PESSOA",MIDDLENAME:"PESSOA",LASTNAME:"PESSOA",GIVENNAME:"PESSOA",SURNAME:"PESSOA",
+  ORGANIZACAO:"ORG",ORG:"ORG",ORGANIZATION:"ORG",LOCAL:"LOCAL",LOC:"LOCAL",LOCATION:"LOCAL",
+  CITY:"LOCAL",STATE:"LOCAL",COUNTY:"LOCAL",ENDERECO:"ENDERECO",ADDRESS:"ENDERECO",STREET:"ENDERECO",
+  BUILDINGNUMBER:"ENDERECO",BUILDINGNUM:"ENDERECO",SECONDARYADDRESS:"ENDERECO",
+  DATA:"DATA",TEMPO:"DATA",DATE:"DATA",DATEOFBIRTH:"DATA",CPF:"CPF",SSN:"CPF",SOCIALNUM:"CPF",TAXNUM:"CPF",
+  CNPJ:"CNPJ",RG:"RG",IDCARDNUM:"RG",CEP:"CEP",ZIPCODE:"CEP",TELEFONE:"TEL",PHONE:"TEL",TELEPHONENUM:"TEL",
+  EMAIL:"EMAIL",BANKACCOUNT:"CONTA",IBAN:"CONTA",DINHEIRO:"VALOR",VALOR:"VALOR",MONEY:"VALOR",AMOUNT:"VALOR",
   ACONTECIMENTO:"EVENTO",EVENTO:"EVENTO",EVENT:"EVENTO",OBRA:"OBRA"};
 const NER_MIN_SCORE = 0.35;
 const TEXT_TYPES = new Set(["PESSOA","ORG","LOCAL","CIDADE","ESTADO","PAIS","ENDERECO","EVENTO","OBRA","TERMO"]);
@@ -792,7 +817,7 @@ const PLACE_TYPES = new Set(["LOCAL","CIDADE","ESTADO","PAIS","ENDERECO"]);
 const MERGE_GAP = {
   DATA:/^[\s.\/-]{0,2}$/, CPF:/^[\s.\/-]{0,2}$/, CNPJ:/^[\s.\/-]{0,2}$/, RG:/^[\s.\/-]{0,2}$/, CEP:/^[\s.-]{0,2}$/,
   TEL:/^[\s().-]{0,3}$/, VALOR:/^[\s.,]{0,2}$/, EMAIL:/^[.@]?$/,
-  ENDERECO:/^\s*[,–-]?\s*(?:n[º°o.]?\s*\d+[A-Za-z]?\s*[,–-]?\s*)?$/iu,
+  ENDERECO:/^\s*[,–-]?\s*(?:n[º°o.]?\s*(?:\d+[A-Za-z]?\s*[,–-]?\s*)?)?$/iu,
   PESSOA:/^['-]?$/, ORG:/^['&-]?$/, LOCAL:/^-?$/,
 };
 const STREET_RE = /^(?:rua|r\.|av\.?|avenida|travessa|tv\.|alameda|al\.|estrada|rodovia|rod\.|pra[çc]a|largo|beco|viela|ladeira|servid[ãa]o|quadra|qd\.)\s/iu;
@@ -839,15 +864,22 @@ function nerSpans(result, text){
         const t=LEADING_TITLE_RE.exec(text.slice(start,end)); if(t) start+=t[0].length;
         if(end<=start || onlyRoles(text.slice(start,end))) continue;
       }
-      if(end>start) list.push({start, end, type, score:e.score});
+      if(end>start) list.push({start, end, type, score:e.score, raw:e.label});
     }
-    // junta pedaços da mesma entidade
+    // nome/lugar/organização sem nenhuma letra é ruído (ex.: "45810-000" como LOCAL)
+    list=list.filter(s=>!TEXT_TYPES.has(s.type) || /\p{L}/u.test(text.slice(s.start,s.end)));
+    for(const s of list){      // "Rua Itaguara" marcado como LOCAL é endereço (e o número vai junto)
+      if(s.type==="LOCAL" && STREET_RE.test(text.slice(s.start,s.end))) s.type="ENDERECO";
+    }
+    // junta pedaços da mesma entidade. Modelos que dão um rótulo por parte do nome
+    // (FIRSTNAME + LASTNAME) também juntam através de espaço: "Maria" + "da Silva".
     list.sort((a,b)=>a.start-b.start);
     const merged=[];
     for(const s of list){
-      const p=merged[merged.length-1];
-      if(p && p.type===s.type && s.start>=p.end && MERGE_GAP[s.type]?.test(text.slice(p.end,s.start))){
-        p.score=(p.score*p.n+s.score)/(p.n+1); p.n++; p.end=s.end;
+      const p=merged[merged.length-1], gap=p ? text.slice(p.end,s.start) : "";
+      const namePart = p && s.type==="PESSOA" && p.raw!==s.raw && /^[ \t]+(?:d[aeo]s?[ \t]+)?$/u.test(gap);
+      if(p && p.type===s.type && s.start>=p.end && (namePart || MERGE_GAP[s.type]?.test(gap))){
+        p.score=(p.score*p.n+s.score)/(p.n+1); p.n++; p.end=s.end; p.raw=s.raw;
       } else merged.push({...s, n:1});
     }
     for(const s of merged){
@@ -857,8 +889,15 @@ function nerSpans(result, text){
         for(const [re,p] of GAZ_PREFIX){ re.lastIndex=0; const m=[...v.matchAll(re)][0]; if(m && m.index===0 && m[0].length===v.length){ prefix=p; break; } }
       }
       if(prefix==="ENDERECO") s.end=addressTail(text, s.end, STREET_RE.test(text.slice(s.start,s.end)));
-      spans.push({start:s.start, end:s.end, value:text.slice(s.start,s.end), prefix,
-        type:NER_TYPES[s.type].label.toLowerCase()+" (modelo)", conf:confOf(s.score), prec:NER_TYPES[s.type].prec,
+      // com confiança baixa, o modelo não passa por cima de regras e listas (ele erra, o
+      // trecho nem vem aceito, e o dado que a regra tinha achado vazava: CEP, RG)
+      const conf=confOf(s.score), v=text.slice(s.start,s.end);
+      let prec = conf==="baixa" ? 25 : NER_TYPES[s.type].prec;
+      // "CPF" do modelo que não passa no dígito verificador (a OpenMed chama qualquer
+      // documento de SSN) continua sugerido, mas não atropela o RG/CEP achado pela regra
+      if((prefix==="CPF" && !validCPF(v)) || (prefix==="CNPJ" && !validCNPJ(v))) prec=Math.min(prec,50);
+      spans.push({start:s.start, end:s.end, value:v, prefix,
+        type:NER_TYPES[s.type].label.toLowerCase()+" (modelo)", conf, prec,
         src:"modelo", score:s.score, model:slug, sensivel:false});
     }
   }
@@ -1146,13 +1185,22 @@ const NER_CDN = {
   "ort-wasm-simd-threaded.asyncify.mjs": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.0-dev.20260914-8d85527a0/dist/ort-wasm-simd-threaded.asyncify.mjs",
   "ort-wasm-simd-threaded.asyncify.wasm": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.0-dev.20260914-8d85527a0/dist/ort-wasm-simd-threaded.asyncify.wasm",
 };
-// Modelos no Hugging Face: ONNX gerado por tools/build_ner_pack.py e publicado por
-// tools/publish_hub.py. Fixar "revision" num commit garante que o arquivo não muda.
+// Modelos no Hugging Face, numa revisão fixa (o arquivo não muda por baixo). Duas formas:
+// - ONNX de terceiros, já publicado: o catálogo declara as variantes [arquivo, bytes];
+//   rótulos e tamanho de contexto vêm do config.json do repositório.
+// - ONNX publicado por tools/publish_hub.py: {repo, revision}; o resto vem do anonlab-model.json.
+// Padrão escolhido nos testes de tests/golden (vazamento 0 de 90, nenhum excesso; ver README).
 const NER_HUB = {
   host: "https://huggingface.co/",
   models: [
-    {repo:"LuizPF42/legal-bert-lgpd-onnx", revision:"main"},
-    {repo:"LuizPF42/ner-harem-base-onnx",  revision:"main"},
+    {repo:"augustaklug/legal-bert-ner-base-cased-ptbr-onnx", revision:"fd285c1ce6ebac8280fc4a3dc99aa8889b053538",
+     title:"Legal-BERT NER — pessoas, organizações, locais, datas", license:"CC-BY-4.0",
+     original:"dominguesm/legal-bert-ner-base-cased-ptbr",
+     variants:{fp16:["onnx/model_fp16.onnx",216976770], fp32:["onnx/model.onnx",433579986]}},
+    {repo:"OpenMed/OpenMed-PII-Portuguese-mLiteClinical-Base-135M-v1-onnx-android", revision:"f8f28b3f1569b81f7c907618b97189ab22d09220",
+     title:"OpenMed PII Português — dados pessoais (documentos, contas, endereços)", license:"Apache-2.0",
+     original:"OpenMed/OpenMed-PII-Portuguese-mLiteClinical-Base-135M-v1", subfolder:"",
+     variants:{fp16:["model_fp16.onnx",269774201], fp32:["model.onnx",539308164]}},
   ],
 };
 // ordem de preferência das variantes ONNX por dispositivo
@@ -1243,14 +1291,33 @@ const NER = (() => {
     return list;
   }
 
-  /** Lista os modelos publicados no Hugging Face (só o manifesto; nada pesado ainda). */
+  // manifesto de um modelo do hub: o anonlab-model.json (publicado por tools/publish_hub.py)
+  // ou, para ONNX de terceiros, montado com o config.json + o que o catálogo declara
+  async function hubMeta(host, m){
+    const url=f=>`${host}${m.repo}/resolve/${m.revision}/${f}`;
+    const get=async f=>{
+      const r=await fetch(url(f),{credentials:"omit"});
+      if(!r.ok) throw new Error(r.status===404||r.status===401 ? `${f} não encontrado (ainda não publicado?)` : `${f}: HTTP ${r.status}`);
+      return r.json();
+    };
+    if(!m.variants) return await get("anonlab-model.json");
+    const cfg=await get("config.json");
+    const id2label=Object.fromEntries(Object.entries(cfg.id2label||{}).map(([k,v])=>[String(k),v]));
+    const tags=[...new Set(Object.values(id2label).filter(l=>l!=="O").map(l=>NerCore.splitTag(l)[1]))];
+    return {slug:m.repo.split("/")[1], title:m.title||m.repo, notes:m.notes||"",
+      source:{hf_id:m.repo, revision:m.revision, license:m.license, original:m.original},
+      id2label, label_map:Object.fromEntries(tags.map(t=>[t, m.label_map?.[t] ?? NER_LABEL_MAP[t.toUpperCase()] ?? null])),
+      variants:Object.fromEntries(Object.entries(m.variants).map(([d,[file,size]])=>[d,{file,size}])),
+      max_length:Math.min(512, cfg.max_position_embeddings||512), stride:128,
+      num_hidden_layers:cfg.num_hidden_layers ?? cfg.n_layers, subfolder:m.subfolder, files:{}};
+  }
+
+  /** Lista os modelos publicados no Hugging Face (só os manifestos; nada pesado ainda). */
   async function openHub(hub){
     const list=[], missing=[];
     for(const m of hub.models){
       try{
-        const r=await fetch(`${hub.host}${m.repo}/resolve/${m.revision}/anonlab-model.json`,{credentials:"omit"});
-        if(!r.ok) throw new Error(r.status===404||r.status===401 ? "não encontrado (ainda não publicado?)" : "HTTP "+r.status);
-        const meta=await r.json();
+        const meta=await hubMeta(hub.host, m);
         list.push({slug:meta.slug||m.repo.split("/")[1], repo:m.repo, revision:m.revision, meta});
       }catch(e){ missing.push(`${m.repo}: ${e.message}`); }
     }
@@ -1273,7 +1340,7 @@ const NER = (() => {
                                                  : "este modelo só tem variante para GPU (WebGPU)");
     const v=m.meta.variants[dtype], meta={id2label:m.meta.id2label, max_length:m.meta.max_length, stride:m.meta.stride};
     let payload;
-    if(pack.mode==="hub") payload={slug, repo:m.repo, revision:m.revision, device, dtype, meta};
+    if(pack.mode==="hub") payload={slug, repo:m.repo, revision:m.revision, subfolder:m.meta.subfolder, device, dtype, meta};
     else {
       const files={};
       for(const [p,info] of Object.entries({...m.meta.files, [v.file]:v})){
@@ -1293,8 +1360,10 @@ const NER = (() => {
       L0.slugs.add(slug);
       Object.assign(state,{status:"ready", loadMs:r.loadMs, warmMs:r.warmMs, lanes:1});
       cache.clear();
-      // pistas extras (só CPU) carregam em segundo plano; o modelo já pode ser usado
-      const want=laneCount(device, v.size);
+      // pistas extras (só CPU) carregam em segundo plano; o modelo já pode ser usado.
+      // A memória é dividida com os outros modelos já na CPU.
+      const others=[...models.values()].filter(x=>x!==state && x.device==="wasm").reduce((a,x)=>a+x.size,0);
+      const want=laneCount(device, v.size+others);
       (async()=>{
         for(let i=1;i<want && models.get(slug)===state;i++){
           const L=lanes[i]||newLane();
@@ -1396,13 +1465,14 @@ async function openNerHubNow(){
   if(NER.pack.missing?.length) nerReadyStatus(`<span class="warn">Indisponível: ${escHtml(NER.pack.missing.join("; "))}</span>`);
 }
 // lista de modelos do pacote; os que não têm variante para o dispositivo ficam desabilitados.
-// autoLoad: na GPU todos rodam juntos (um cobre o que o outro não tem); na CPU, que é
-// lenta, só o primeiro — os outros ficam a um clique
+// autoLoad: na GPU todos rodam juntos (um cobre o que o outro não tem); na CPU, só os de
+// tamanho Base (até 12 camadas) — um Large, lento na CPU, fica a um clique
 async function renderNerModels(autoLoad){
   const list=NER.pack.list;
   const g = $("#ner-device").value==="wasm" ? null : await NER.gpu();
   const runnable=list.filter(m=>NER.dtypeFor(m.meta,g));
-  const auto = autoLoad ? (g ? runnable : runnable.slice(0,1)) : [];
+  const small=runnable.filter(m=>(m.meta.num_hidden_layers ?? 12)<=12);
+  const auto = autoLoad ? (g ? runnable : (small.length ? small : runnable.slice(0,1))) : [];
   const box=$("#ner-models"); box.innerHTML="";
   for(const m of list){
     const ok=runnable.includes(m), on=auto.includes(m) || NER.model(m.slug)?.status==="ready";

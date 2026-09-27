@@ -61,12 +61,20 @@ CPF/CNPJ/CNS, etc.). **Experimental, sem garantia** (aviso no README e no app).
 
 - **Baixar (padrão, "🌐 Baixar modelos"):** o runtime vem do jsDelivr
   (`NER_CDN`, os mesmos bytes do npm, conferidos por SHA-256) e os modelos do
-  Hugging Face (`NER_HUB`: `<usuário>/<slug>-onnx` numa revisão fixa, publicado
-  por `tools/publish_hub.py`). O transformers.js guarda os modelos no Cache API
-  do navegador, e da segunda vez nada é baixado. "Carregar sozinho ao abrir"
-  (localStorage) vem marcado. O `env.fetch` só aceita o host do hub; os
-  redirecionamentos para a CDN do Hugging Face (`*.hf.co`) o navegador segue
-  sozinho.
+  Hugging Face, numa revisão fixa (`NER_HUB`). Ninguém precisa de conta: o
+  padrão usa ONNX que outras pessoas já publicaram, e o catálogo declara as
+  variantes `[arquivo, bytes]`; rótulos e contexto vêm do `config.json`.
+  Modelos publicados por `tools/publish_hub.py` entram só com
+  `{repo, revision}` e trazem o `anonlab-model.json`. O transformers.js guarda
+  os modelos no Cache API do navegador, e da segunda vez nada é baixado.
+  "Carregar sozinho ao abrir" (localStorage) vem marcado. O `env.fetch` só
+  aceita o host do hub; os redirecionamentos para a CDN do Hugging Face
+  (`*.hf.co`) o navegador segue sozinho.
+- **Modelos padrão** (escolhidos nos testes de `tests/golden`, seção 13):
+  `dominguesm/legal-bert-ner-base-cased-ptbr` (ONNX de augustaklug, CC-BY-4.0;
+  pessoas, organizações, locais, datas) + OpenMed PII Portuguese mLiteClinical
+  (Apache-2.0; 54 tipos de dado pessoal). Na GPU: fp16, 207 + 257 MB. Na CPU:
+  fp32, 414 + 514 MB (as versões int8 desses modelos não foram validadas).
 - **Pasta local (offline):** o pacote abaixo, selecionado pelo pesquisador.
 
 **Pacote** (`dist/anonlab-ner/`, gerado por `tools/build_ner_pack.py`; é também
@@ -112,10 +120,12 @@ models/<slug>/            anonlab-model.json (rótulos, label_map, variantes, va
 - **Não aceitar** repositório ou host de modelo vindo da URL (`?modelo=`):
   qualquer pessoa pode publicar no Hugging Face, e um link malicioso poderia
   trocar o modelo por um que "não vê" nomes.
-- **Vários modelos** rodam juntos e as entidades se somam. O pacote padrão tem
-  `legal-bert-lgpd` (dados pessoais; não tem ORGANIZACAO/LOCAL) e HAREM Base
-  (geral; tem ORGANIZACAO/LOCAL). Na GPU os dois carregam sozinhos; na CPU, só
-  o primeiro. Modelo sem variante para o dispositivo aparece desabilitado.
+- **Vários modelos** rodam juntos e as entidades se somam: o legal-bert-ner
+  acha pessoas, organizações e locais; a OpenMed, documentos, contas e partes
+  de endereço. Na GPU todos carregam sozinhos; na CPU, os de até 12 camadas
+  (um Large, 24 camadas, ficaria lento demais). No pacote local, o
+  `legal-bert-lgpd` (sem ORGANIZACAO/LOCAL) vai junto com o HAREM Base. Modelo
+  sem variante para o dispositivo aparece desabilitado.
 - O **Detectar espera** o pacote e os modelos terminarem de carregar.
 
 ---
@@ -187,6 +197,16 @@ Notas de implementação:
   sejam compatíveis (iguais, ou ambos de lugar). Exemplo: o modelo marca
   "Jardim Aurélia" com 0,65 (baixa) e a heurística de bairro com confiança
   média; o resultado sai média e já vem aceito.
+- **O modelo não atropela regras certas:** trecho do modelo com confiança
+  baixa (<0,7) cai para precedência 25, abaixo de regras e listas; "CPF" do
+  modelo que não passa no dígito verificador cai para 50 (a OpenMed chama
+  qualquer documento de SSN). Sem isso, o HAREM marcava "45810-000" como
+  LOCAL com 0,37, o trecho nem vinha aceito, e o CEP que a regra tinha achado
+  vazava. Nome/lugar/organização sem nenhuma letra é descartado.
+- **Rótulos por parte do nome** (FIRSTNAME + LASTNAME, na OpenMed) se juntam
+  através de espaço ("Maria" + "da Silva"); rótulos iguais em sequência não
+  (podem ser duas pessoas). LOCAL que começa com logradouro ("Rua Itaguara")
+  vira ENDERECO, e o número entra junto.
 - **Um tipo por valor:** o mesmo texto recebe sempre o mesmo tipo, o do span
   de maior precedência. Sem isso, "Recife" viraria LOCAL aqui e CIDADE ali,
   com pseudônimos diferentes.
@@ -388,7 +408,10 @@ Manter o princípio: qualquer lib usada é **embutida** no arquivo (ainda offlin
   perfis salvos (export/import de config como JSON, ainda offline).
 - **v1.1 (feito):** modelos baixados do Hugging Face no próprio navegador
   (runtime do jsDelivr com SHA-256, cache do navegador, carregar sozinho);
-  `tools/publish_hub.py`; aviso de software experimental.
+  padrão com modelos já publicados em ONNX, sem conta; `tools/publish_hub.py`
+  para acrescentar outros; aviso de software experimental. Detectores novos:
+  SIAPE, agência/conta, `@` de rede social (agora ligado), instituições com
+  nome (escola, hospital, UBS…) e instituições religiosas (sensível).
 - **v3 (avaliar):** modelo Base destilado do legal-bert-lgpd (3× mais rápido
   na CPU); lista de nomes do IBGE como gazetteer.
 
@@ -402,12 +425,17 @@ Manter o princípio: qualquer lib usada é **embutida** no arquivo (ainda offlin
 3. **Sensíveis 🔴**: ligar por padrão (mais seguro, mais ruído) ou deixar opt-in?
 4. **Codebook**: precisa reidentificar depois (longitudinal) ou é via de mão única?
 5. **Municípios**: vale embutir lista grande (arquivo cresce) ou ficar no livre?
-6. **Modelos NER padrão**: hoje `legal-bert-lgpd` + HAREM Base. Na CPU só o
-   LGPD roda (o HAREM não tem variante quantizada aprovada). Vale incluir o
-   HAREM em fp32 (416 MB) para a CPU, ou destilar um modelo Base próprio?
-7. **Distribuição dos modelos:** resolvida pelo Hugging Face (`publish_hub.py`).
-   Licenças: legal-bert-lgpd e HAREM são MIT; os modelos LeNER-Br do
-   pierreguillou não declaram licença, e o script não os publica.
+6. **Modelos NER padrão**: hoje legal-bert-ner (dominguesm) + OpenMed PII,
+   já publicados em ONNX, sem conta. O `legal-bert-lgpd` (LGPD) empatou nos
+   testes, mas exigiria publicar a conversão e tem a ressalva de licença.
+   Vale criar uma organização do projeto no Hugging Face para publicar
+   conversões próprias?
+7. **Distribuição dos modelos:** resolvida pelo Hugging Face. O padrão usa
+   ONNX já publicado por terceiros; conversões próprias saem pelo
+   `publish_hub.py`. Licenças: legal-bert-ner é CC-BY-4.0 (exige crédito, que
+   aparece no cartão e no README); OpenMed é Apache-2.0; legal-bert-lgpd e
+   HAREM são MIT; os modelos LeNER-Br do pierreguillou não declaram licença, e
+   o script não os publica.
 
 ---
 
@@ -448,8 +476,18 @@ Manter o princípio: qualquer lib usada é **embutida** no arquivo (ainda offlin
 - Velocidade (RTX 3060 / Ryzen 5 5500): WebGPU fp16 ~80 ms por janela de 512
   tokens (lote de 4); WASM q4 ~12 s por janela por pista; 4 pistas processam
   3.540 tokens em ~40 s (1 pista: ~109 s).
-- **Vazamento** (tests/golden, 54 dados pessoais, só o aceito por padrão):
-  sem modelo 32 sobram; LGPD 1; LGPD + HAREM 0, sem excesso. Os documentos
-  foram escritos junto com os ajustes: é regressão, não benchmark.
+- **Vazamento** (tests/golden, 5 documentos, 90 dados pessoais, só o aceito
+  por padrão; "vazou" inclui parcial). Rodada 1, com os 2 documentos novos
+  ainda inéditos: sem modelo 59; LGPD + HAREM 5; legal-bert-ner 10; HAREM
+  NeuralMind 9; mBERT 12; OpenMed 25; **legal-bert-ner + OpenMed 4**. Rodada
+  2, depois das correções que independem do modelo (SIAPE, conta, `@`,
+  precedência de baixa confiança, LOCAL → ENDERECO): sem modelo 50; LGPD +
+  HAREM 0 (1 excesso); legal-bert-ner 1; HAREM NeuralMind 1; mBERT 3; OpenMed
+  19; **legal-bert-ner + OpenMed 0 e nenhum excesso, na GPU (fp16) e na CPU
+  (fp32)**. A rodada 2 é regressão, não benchmark.
+- **Tokenizador JS vs. HF:** 0 divergências nos vocabulários de BERTimbau,
+  mBERT (Xenova), legal-bert (dominguesm) e mLiteClinical (OpenMed). Atenção:
+  alguns `tokenizer.json` trazem truncamento/preenchimento a 512 configurados;
+  a referência precisa de `no_padding()`/`no_truncation()`.
 - Rótulos do modelo → tipos do AnonLab: `LABEL_MAP` no script de build
   (vai para `label_map` no pacote) e `NER_LABEL_MAP` no HTML (fallback).

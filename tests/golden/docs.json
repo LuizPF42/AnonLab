@@ -262,6 +262,180 @@
         "EXCELENTÍSSIMO SENHOR DOUTOR JUIZ",
         "Nestes termos, pede deferimento"
       ]
+    },
+    {
+      "id": "diario_campo",
+      "tipo": "diário de campo (assistência social)",
+      "novo": true,
+      "text": "Diário de campo — visita 3 (quinta-feira, 18 de abril de 2024)\nCheguei à casa da Dona Zefa (Josefa Maria dos Santos) por volta das 9h, na Rua Bento Gonçalves, 77, no Morro da Conceição, em Porto Alegre. O neto dela, o Kauan, de 12 anos, estava faltando à Escola Municipal Anísio Teixeira desde março. A vizinha, Sueli Brandão, contou que o pai do menino, conhecido como Tonhão, trabalha de pedreiro para a Construtora Sul Forte e só aparece aos domingos. Zefa frequenta a Igreja Batista da Lagoinha e faz tratamento no posto de saúde da Vila Cruzeiro com o Dr. Henrique Lopes. Para marcar a próxima visita, ela pediu que eu mandasse mensagem no WhatsApp da filha, a Débora: (51) 99654-3210. A Débora tem um perfil no Instagram, @debora.santos.poa, onde vende doces.\nObservação: segundo a agente comunitária Marta, a família recebe o Bolsa Família desde 2019.",
+      "pii": [
+        {
+          "text": "Zefa",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Josefa Maria dos Santos",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Rua Bento Gonçalves, 77",
+          "tipo": "ENDERECO"
+        },
+        {
+          "text": "Morro da Conceição",
+          "tipo": "LOCAL"
+        },
+        {
+          "text": "Porto Alegre",
+          "tipo": "LOCAL"
+        },
+        {
+          "text": "Kauan",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Escola Municipal Anísio Teixeira",
+          "tipo": "ORG"
+        },
+        {
+          "text": "Sueli Brandão",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Tonhão",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Construtora Sul Forte",
+          "tipo": "ORG"
+        },
+        {
+          "text": "Igreja Batista da Lagoinha",
+          "tipo": "ORG"
+        },
+        {
+          "text": "Vila Cruzeiro",
+          "tipo": "LOCAL"
+        },
+        {
+          "text": "Henrique Lopes",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Débora",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "(51) 99654-3210",
+          "tipo": "TEL"
+        },
+        {
+          "text": "@debora.santos.poa",
+          "tipo": "REDE"
+        },
+        {
+          "text": "Marta",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "18 de abril de 2024",
+          "tipo": "DATA"
+        }
+      ],
+      "fp_ok": [
+        "Diário de campo",
+        "Bolsa Família",
+        "pedreiro",
+        "vende doces",
+        "agente comunitária"
+      ]
+    },
+    {
+      "id": "oficio_rh",
+      "tipo": "ofício administrativo (RH)",
+      "novo": true,
+      "text": "UNIVERSIDADE FEDERAL DO SUL — Pró-Reitoria de Gestão de Pessoas\nOfício nº 245/2023 — Porto Seguro, 7 de novembro de 2023\n\nAssunto: ressarcimento de despesas — servidora ANA PAULA FERREIRA COSTA, SIAPE 1234567.\n\nPrezado Sr. Ricardo Menezes,\nEncaminhamos o pedido da servidora Ana Paula Ferreira Costa (CPF 104.332.181-00, RG 8.765.432-1 SSP/BA), lotada no Departamento de Letras, para ressarcimento de R$ 1.250,00. O depósito deverá ser feito no Banco do Brasil, agência 1234-5, conta corrente 98765-4, ou pela chave PIX anapaula.costa@ufsul.edu.br.\nA servidora reside na Av. Oceânica, 1020, bloco B, apto. 51, Taperapuã, Porto Seguro - BA, CEP 45810-000, telefone (73) 3288-1122.\nEm caso de dúvidas, contatar Fernanda Rocha, da Coordenação de Pagamentos, pelo ramal 4410.\nAtenciosamente,\nProf. Dr. Márcio Tavares Neto — Pró-Reitor",
+      "pii": [
+        {
+          "text": "UNIVERSIDADE FEDERAL DO SUL",
+          "tipo": "ORG"
+        },
+        {
+          "text": "ANA PAULA FERREIRA COSTA",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "1234567",
+          "tipo": "SIAPE"
+        },
+        {
+          "text": "Ricardo Menezes",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Ana Paula Ferreira Costa",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "104.332.181-00",
+          "tipo": "CPF"
+        },
+        {
+          "text": "8.765.432-1",
+          "tipo": "RG"
+        },
+        {
+          "text": "1234-5",
+          "tipo": "CONTA"
+        },
+        {
+          "text": "98765-4",
+          "tipo": "CONTA"
+        },
+        {
+          "text": "anapaula.costa@ufsul.edu.br",
+          "tipo": "EMAIL"
+        },
+        {
+          "text": "Av. Oceânica, 1020, bloco B, apto. 51",
+          "tipo": "ENDERECO"
+        },
+        {
+          "text": "Taperapuã",
+          "tipo": "LOCAL"
+        },
+        {
+          "text": "Porto Seguro",
+          "tipo": "LOCAL"
+        },
+        {
+          "text": "45810-000",
+          "tipo": "CEP"
+        },
+        {
+          "text": "(73) 3288-1122",
+          "tipo": "TEL"
+        },
+        {
+          "text": "Fernanda Rocha",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "Márcio Tavares Neto",
+          "tipo": "PESSOA"
+        },
+        {
+          "text": "7 de novembro de 2023",
+          "tipo": "DATA"
+        }
+      ],
+      "fp_ok": [
+        "Pró-Reitoria de Gestão de Pessoas",
+        "ressarcimento de despesas",
+        "Atenciosamente",
+        "Assunto",
+        "ramal"
+      ]
     }
   ]
 }

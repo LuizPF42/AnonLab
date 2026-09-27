@@ -13,8 +13,12 @@ anonimizador.html baixá-los direto no navegador ("🌐 Baixar modelos").
 
 Cria um repositório por modelo (<usuário>/<slug>-onnx) com os ONNX, o
 tokenizador, o manifesto do AnonLab e um model card que credita o modelo
-original. No fim, fixa no anonimizador.html (NER_HUB) o commit publicado, para
-o navegador baixar sempre exatamente esses arquivos.
+original. No fim, acrescenta ao catálogo do anonimizador.html (NER_HUB) o commit
+publicado, para o navegador baixar sempre exatamente esses arquivos.
+
+Não é preciso para usar o AnonLab: o padrão já usa modelos que outras pessoas
+publicaram em ONNX. Serve para acrescentar modelos que só existem em PyTorch
+(como o legal-bert-lgpd).
 
 Só publica derivados de modelos com licença declarada no Hugging Face (use
 --allow-unlicensed por sua conta e risco).
@@ -104,19 +108,26 @@ def model_card(meta: dict, repo: str) -> str:
 
 
 def update_html(published: list[tuple[str, str]]) -> None:
+    """Acrescenta (ou atualiza a revisão de) cada repositório no catálogo NER_HUB, sem
+    tirar os que já estão lá (ex.: os modelos de terceiros do padrão)."""
     html = ROOT / "anonimizador.html"
     s = html.read_text(encoding="utf-8")
-    body = "".join(f'    {{repo:"{repo}", revision:"{rev}"}},\n' for repo, rev in published)
     nl = "\r\n" if "\r\n" in s else "\n"
-    body = body.replace("\n", nl)
-    new, n = re.subn(r"(const NER_HUB = \{\r?\n  host: \"[^\"]*\",\r?\n  models: \[\r?\n)(.*?)(  \],\r?\n\};)",
-                     lambda m: m.group(1) + body + m.group(3), s, flags=re.S)
-    if n != 1:
-        print("  aviso: não achei o bloco NER_HUB no anonimizador.html; atualize à mão:")
-        print(body)
+    head = re.compile(r"const NER_HUB = \{\r?\n  host: \"[^\"]*\",\r?\n  models: \[\r?\n")
+    if not head.search(s):
+        print("  aviso: não achei o bloco NER_HUB no anonimizador.html; acrescente à mão:")
+        for repo, rev in published:
+            print(f'    {{repo:"{repo}", revision:"{rev}"}},')
         return
-    html.write_text(new, encoding="utf-8")
-    print(f"  anonimizador.html: NER_HUB aponta para {len(published)} repositório(s), em commits fixos")
+    for repo, rev in published:
+        entry = re.compile(r'(repo:"' + re.escape(repo) + r'",\s*revision:")[^"]*(")')
+        if entry.search(s):
+            s = entry.sub(lambda m: m.group(1) + rev + m.group(2), s, count=1)
+        else:
+            m = head.search(s)
+            s = s[:m.end()] + f'    {{repo:"{repo}", revision:"{rev}"}},{nl}' + s[m.end():]
+    html.write_text(s, encoding="utf-8")
+    print(f"  anonimizador.html: {len(published)} repositório(s) no catálogo NER_HUB, em commits fixos")
 
 
 def main() -> None:
