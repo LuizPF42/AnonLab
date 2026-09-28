@@ -1,0 +1,3 @@
+# fixtures de teste: bytes exatos (o CSV testa CRLF dentro de célula, e o
+# .qualilab é o arquivo do repositório do QualiLab, sem conversão)
+tests/fixtures/** -text
