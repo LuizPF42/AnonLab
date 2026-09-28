@@ -98,6 +98,21 @@
   .pill.ok{color:var(--ok);border-color:#1e5e38}
   .pill.bad{color:var(--bad);border-color:var(--bad)}
   .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+  /* arquivo aberto (CSV / QualiLab) */
+  #source{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px}
+  .src-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+  .src-head b{font-size:13px;word-break:break-all}
+  .cols{width:100%;border-collapse:collapse;margin-top:8px;font-size:12px}
+  .cols{table-layout:fixed}
+  .cols td{padding:4px;border-top:1px dashed var(--line);vertical-align:middle}
+  .cols td:last-child{width:58%}
+  .cols .cn{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cols .ex{color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono);font-size:10.5px}
+  .cols select{width:100%}
+  .loc{font-size:10.5px;color:var(--mut);display:block;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .item>div:nth-child(2){min-width:0}
+  #source .chk{align-items:flex-start;font-size:12.5px}
+  #source .chk input{flex-shrink:0;margin-top:2px}
   .cnt{font-size:11px;color:var(--mut)}
   .empty{color:var(--mut);text-align:center;padding:30px;font-size:13px}
   .out-head{display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px}
@@ -121,16 +136,18 @@
 <main>
   <!-- COLUNA ESQUERDA: entrada e configuração -->
   <section class="col left">
-    <div class="card">
+    <div class="card" id="doc-card">
       <h2>1 · Documento</h2>
       <textarea id="input" placeholder="Cole aqui o texto a anonimizar…"></textarea>
+      <div id="source" hidden></div>
       <div class="row between" style="margin-top:8px">
         <div class="row">
-          <label class="file"><input type="file" id="file" accept=".txt,text/plain"><button class="ghost sm" onclick="document.getElementById('file').click()">📂 Abrir .txt</button></label>
+          <label class="file"><input type="file" id="file" accept=".txt,.csv,.tsv,.qualilab,text/plain,text/csv"><button class="ghost sm" id="open-file">📂 Abrir arquivo</button></label>
           <button class="ghost sm" id="sample">Exemplo</button>
         </div>
         <span class="sub" id="charcount">0 caracteres</span>
       </div>
+      <p class="note">Texto (.txt), planilha (.csv) ou projeto do QualiLab (.qualilab). Também dá para arrastar o arquivo para cá.</p>
     </div>
 
     <div class="card">
@@ -223,6 +240,7 @@
         <button class="ghost sm" id="dl-key">Codebook 🔑</button>
       </div>
     </div>
+    <p class="note" id="out-info" hidden></p>
     <textarea id="output" placeholder="O texto anonimizado aparece aqui depois de Detectar + Aplicar."></textarea>
     <p class="note warn">⚠️ Isto <b>assiste</b> a anonimização, não a garante. Quase-identificadores (data + profissão rara + cidade pequena) ainda podem reidentificar. Revise sempre. O <b>codebook</b> reidentifica os dados — guarde separado ou descarte.</p>
   </section>
@@ -597,6 +615,381 @@ self.onmessage = async ({ data: m }) => {
 };
 </script>
 
+<script id="formats">
+/* ===================== formatos =====================
+   CSV, zip e .qualilab (QualiLab): leitura, escrita e o reancoramento dos
+   offsets depois de trocar trechos por rótulos. JS puro, sem DOM e sem
+   dependências: roda na página e no Node (tests/test_formats.mjs). */
+const Formats = (() => {
+  "use strict";
+
+  /* ---------- texto ---------- */
+  // UTF-8 (com ou sem BOM); se os bytes não forem UTF-8 válido, Windows-1252 (o "ANSI" do Excel)
+  function decodeText(u8){
+    const bom = u8.length>=3 && u8[0]===0xEF && u8[1]===0xBB && u8[2]===0xBF;
+    try{ return { text:new TextDecoder("utf-8",{fatal:true,ignoreBOM:true}).decode(bom ? u8.subarray(3) : u8), encoding:"utf-8", bom }; }
+    catch(_){ return { text:new TextDecoder("windows-1252").decode(u8), encoding:"windows-1252", bom:false }; }
+  }
+
+  // A detecção trabalha em NFC ("João" decomposto quebraria listas e o modelo), mas a saída
+  // precisa dos offsets do texto ORIGINAL: no .qualilab, cada trecho codificado se ancora nele.
+  // NFC não compõe através de "caractere base + marcas", então basta normalizar cada grupo.
+  function nfcView(s){
+    const t = s.normalize("NFC");
+    if(t===s) return { text:s, starts:null, origs:null };
+    const starts=[], origs=[]; let out="";
+    for(const m of s.matchAll(/\P{M}\p{M}*|\p{M}+/gsu)){ starts.push(out.length); origs.push(m.index); out+=m[0].normalize("NFC"); }
+    if(out!==t) return { text:s, starts:null, origs:null };   // caso raro (hangul): fica o original
+    starts.push(out.length); origs.push(s.length);
+    return { text:t, starts, origs };
+  }
+  // offset no texto NFC -> offset no original (no meio de um grupo: o grupo inteiro)
+  function toOrig(view, i, isEnd){
+    if(!view.starts) return i;
+    const S=view.starts; let lo=0, hi=S.length-1;
+    while(lo<hi){ const mid=(lo+hi+1)>>1; if(S[mid]<=i) lo=mid; else hi=mid-1; }
+    return S[lo]===i || !isEnd ? view.origs[lo] : view.origs[lo+1];
+  }
+
+  // Troca [start,end) por rótulos (ordenados, sem sobreposição) e devolve o texto novo e o
+  // remapeamento: quem começa ou termina DENTRO de um trecho trocado passa a cobrir o rótulo
+  // inteiro; o resto só desloca.
+  function replaceSpans(text, reps){
+    const S=[], E=[], NS=[], NE=[]; let out="", cur=0;
+    for(const r of reps){
+      if(r.start<cur || r.end<=r.start) continue;
+      out+=text.slice(cur,r.start); NS.push(out.length); out+=r.label; NE.push(out.length);
+      S.push(r.start); E.push(r.end); cur=r.end;
+    }
+    out+=text.slice(cur);
+    const map=(x, isEnd)=>{
+      let lo=0, hi=S.length-1, k=-1;               // último trecho que começa antes de x
+      while(lo<=hi){ const mid=(lo+hi)>>1; if(S[mid]<x){ k=mid; lo=mid+1; } else hi=mid-1; }
+      if(k<0) return x;
+      if(x<E[k]) return isEnd ? NE[k] : NS[k];
+      return NE[k] + (x-E[k]);
+    };
+    return { text:out, mapStart:x=>map(x,false), mapEnd:x=>map(x,true) };
+  }
+
+  /* ---------- CSV (RFC 4180) ---------- */
+  const DELIMS = [";", ",", "\t", "|"];
+  // o separador que aparece o mesmo número de vezes (> 0) no maior número de linhas;
+  // vírgula dentro de aspas não conta (resposta aberta num CSV com ";")
+  function sniffDelimiter(text){
+    let best=",", bestScore=-1;
+    for(const d of DELIMS){
+      const counts=[]; let n=0, inQ=false;
+      for(let i=0; i<text.length && counts.length<50; i++){
+        const ch=text[i];
+        if(ch==='"') inQ=!inQ;
+        else if(!inQ){ if(ch===d) n++; else if(ch==="\n"){ counts.push(n); n=0; } }
+      }
+      if(n) counts.push(n);
+      const freq=new Map(); for(const c of counts) if(c>0) freq.set(c,(freq.get(c)||0)+1);
+      let score=-1; for(const [c,f] of freq) score=Math.max(score, f*1000+c);
+      if(score>bestScore){ bestScore=score; best=d; }
+    }
+    return best;
+  }
+  // linhas de células {v, q}: q = veio entre aspas (a escrita mantém)
+  function parseCSV(text, delim){
+    const rows=[]; let row=[], i=0, crlf=0, lf=0, trailingEOL=false;
+    const n=text.length;
+    while(i<n){
+      let v="", q=false;
+      if(text[i]==='"'){
+        q=true; i++;
+        for(;;){
+          const j=text.indexOf('"',i);
+          if(j<0){ v+=text.slice(i); i=n; break; }            // aspas sem fechar: vai até o fim
+          v+=text.slice(i,j); i=j+1;
+          if(text[i]==='"'){ v+='"'; i++; } else break;
+        }
+        while(i<n && text[i]!==delim && text[i]!=="\n" && text[i]!=="\r") v+=text[i++];   // malformado: fica no valor
+      } else {
+        let j=i; while(j<n && text[j]!==delim && text[j]!=="\n" && text[j]!=="\r") j++;
+        v=text.slice(i,j); i=j;
+      }
+      row.push({v,q});
+      if(i>=n) break;
+      if(text[i]===delim){ i++; if(i>=n) row.push({v:"",q:false}); continue; }
+      if(text[i]==="\r" && text[i+1]==="\n"){ crlf++; i+=2; } else { lf++; i++; }
+      rows.push(row); row=[];
+      if(i>=n) trailingEOL=true;
+    }
+    if(row.length) rows.push(row);
+    return { rows, eol: crlf>lf ? "\r\n" : "\n", trailingEOL };
+  }
+  function writeCSV(csv, delim){
+    const needs=v=>v.includes(delim) || /["\r\n]/.test(v);
+    const cell=c=>(c.q || needs(c.v)) ? '"'+c.v.replace(/"/g,'""')+'"' : c.v;
+    return csv.rows.map(r=>r.map(cell).join(delim)).join(csv.eol) + (csv.trailingEOL ? csv.eol : "");
+  }
+
+  /* ---------- zip (só o necessário: store/deflate, sem zip64) ---------- */
+  const CRC_T = (() => { const t=new Uint32Array(256); for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c = c&1 ? 0xEDB88320^(c>>>1) : c>>>1; t[n]=c>>>0; } return t; })();
+  function crc32(u8){ let c=0xFFFFFFFF; for(let i=0;i<u8.length;i++) c=CRC_T[(c^u8[i])&0xFF]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
+  async function viaStream(u8, stream){ return new Uint8Array(await new Response(new Blob([u8]).stream().pipeThrough(stream)).arrayBuffer()); }
+  async function readZip(u8){
+    const dv=new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    let e=-1;
+    for(let i=u8.length-22; i>=Math.max(0, u8.length-22-65535); i--) if(dv.getUint32(i,true)===0x06054b50){ e=i; break; }
+    if(e<0) throw new Error("zip sem diretório central");
+    const count=dv.getUint16(e+10,true); let p=dv.getUint32(e+16,true);
+    const out=new Map(), dec=new TextDecoder();
+    for(let k=0;k<count;k++){
+      if(dv.getUint32(p,true)!==0x02014b50) throw new Error("zip: diretório central inválido");
+      const method=dv.getUint16(p+10,true), crc=dv.getUint32(p+16,true);
+      const csize=dv.getUint32(p+20,true), usize=dv.getUint32(p+24,true);
+      const nlen=dv.getUint16(p+28,true), xlen=dv.getUint16(p+30,true), clen=dv.getUint16(p+32,true), lho=dv.getUint32(p+42,true);
+      const name=dec.decode(u8.subarray(p+46, p+46+nlen));
+      p+=46+nlen+xlen+clen;
+      if(name.endsWith("/")) continue;
+      if(csize===0xFFFFFFFF || usize===0xFFFFFFFF) throw new Error("zip64 não suportado ("+name+")");
+      if(dv.getUint32(lho,true)!==0x04034b50) throw new Error("zip: cabeçalho local inválido ("+name+")");
+      const start=lho+30+dv.getUint16(lho+26,true)+dv.getUint16(lho+28,true);
+      const raw=u8.subarray(start, start+csize);
+      const data = method===0 ? raw.slice() : method===8 ? await viaStream(raw, new DecompressionStream("deflate-raw")) : null;
+      if(!data) throw new Error("zip: compressão "+method+" não suportada ("+name+")");
+      if(data.length!==usize || crc32(data)!==crc) throw new Error("zip: "+name+" corrompido");
+      out.set(name, data);
+    }
+    return out;
+  }
+  // entradas: [{name, data:Uint8Array, store}] -> Uint8Array
+  async function writeZip(entries){
+    const enc=new TextEncoder(), parts=[], central=[]; let off=0;
+    const d=new Date(), time=(d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1), date=((d.getFullYear()-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate();
+    for(const en of entries){
+      const name=enc.encode(en.name), crc=crc32(en.data);
+      let method=0, comp=en.data;
+      if(!en.store){ const z=await viaStream(en.data, new CompressionStream("deflate-raw")); if(z.length<en.data.length){ method=8; comp=z; } }
+      const lh=new Uint8Array(30+name.length), l=new DataView(lh.buffer);
+      l.setUint32(0,0x04034b50,true); l.setUint16(4,20,true); l.setUint16(6,0x0800,true); l.setUint16(8,method,true);
+      l.setUint16(10,time,true); l.setUint16(12,date,true); l.setUint32(14,crc,true);
+      l.setUint32(18,comp.length,true); l.setUint32(22,en.data.length,true); l.setUint16(26,name.length,true);
+      lh.set(name,30);
+      const ch=new Uint8Array(46+name.length), c=new DataView(ch.buffer);
+      c.setUint32(0,0x02014b50,true); c.setUint16(4,20,true); c.setUint16(6,20,true); c.setUint16(8,0x0800,true); c.setUint16(10,method,true);
+      c.setUint16(12,time,true); c.setUint16(14,date,true); c.setUint32(16,crc,true);
+      c.setUint32(20,comp.length,true); c.setUint32(24,en.data.length,true); c.setUint16(28,name.length,true); c.setUint32(42,off,true);
+      ch.set(name,46);
+      parts.push(lh, comp); central.push(ch); off+=lh.length+comp.length;
+    }
+    if(entries.length>0xFFFF || off>0xFFFFFFFF) throw new Error("zip grande demais (zip64 não suportado)");
+    const cd=central.reduce((a,b)=>a+b.length,0), eocd=new Uint8Array(22), z=new DataView(eocd.buffer);
+    z.setUint32(0,0x06054b50,true); z.setUint16(8,entries.length,true); z.setUint16(10,entries.length,true);
+    z.setUint32(12,cd,true); z.setUint32(16,off,true);
+    const all=[...parts, ...central, eocd], out=new Uint8Array(all.reduce((a,b)=>a+b.length,0));
+    let q=0; for(const b of all){ out.set(b,q); q+=b.length; }
+    return out;
+  }
+
+  /* ---------- .qualilab ----------
+     JSON puro (projeto sem PDF) ou zip com project.json + pdfs/<docId>.pdf + pdfindex/<docId>.json.
+     Cada trecho codificado é (document_id, span_start, span_end) sobre documents[].content, e o
+     quote é exatamente essa fatia: o QualiLab confere isso e, na censura, "falha fechado" (mascara
+     o documento inteiro) se não bater. */
+  const HAS_OPTIONS = k => k==="select" || k==="single" || k==="checkbox";
+  const MULTI_SEP = " | ";                          // CAT_MULTI_SEP do QualiLab (caixa de seleção)
+  const RED_FAMILY = "Censura (AnonLab)";
+  const KNOWN = new Set(["_meta","documents","categories","doc_values","codes","codings","memos","ia_results","ia_memory",
+    "activity","link_relations","links","disagreements","snapshots"]);
+  const MEMO_SCOPE = {project:"do projeto", document:"de documento", code:"de código", coding:"de trecho"};
+
+  async function readQualilab(u8){
+    let db, pdfs=new Map(), pdfIndex=new Map(), other=new Map(), zipped=false;
+    if(u8.length>=2 && u8[0]===0x50 && u8[1]===0x4B){
+      zipped=true;
+      const files=await readZip(u8);
+      const pj=files.get("project.json");
+      if(!pj) throw new Error("zip sem project.json: isto é um .qualilab?");
+      db=JSON.parse(new TextDecoder().decode(pj));
+      for(const [name,data] of files){
+        let m;
+        if(name==="project.json") continue;
+        if((m=/^pdfs\/(.+)\.pdf$/.exec(name))) pdfs.set(m[1], data);
+        else if((m=/^pdfindex\/(.+)\.json$/.exec(name))) pdfIndex.set(m[1], data);
+        else other.set(name, data);
+      }
+    } else {
+      let t=new TextDecoder().decode(u8); if(t.charCodeAt(0)===0xFEFF) t=t.slice(1);
+      db=JSON.parse(t);
+    }
+    if(!db || !Array.isArray(db.documents)) throw new Error("não parece um .qualilab (falta a lista de documentos)");
+    for(const k of ["categories","doc_values","codes","codings","memos"]) if(!Array.isArray(db[k])) db[k]=[];
+    return { db, pdfs, pdfIndex, other, zipped };
+  }
+
+  // os textos do projeto que passam pela detecção, na ordem da revisão: corpo dos documentos,
+  // depois o que a censura do QualiLab não alcança (título, memo, valor de categoria)
+  function qualilabSegments(db){
+    const segs=[], docs=db.documents||[];
+    const cats=new Map((db.categories||[]).map(c=>[c.id,c])), dname=new Map(docs.map(d=>[d.id, String(d.name||d.id)]));
+    const add=(key, text, where, body)=>{ if(text!=null && String(text).trim()) segs.push({key, text:String(text), where, body:!!body}); };
+    for(const d of docs) if(typeof d.content==="string") add("doc:"+d.id, d.content, "«"+dname.get(d.id)+"»", true);
+    for(const d of docs) add("name:"+d.id, d.name, "título de documento");
+    (db.memos||[]).forEach((m,i)=>add("memo:"+i, m.content, "memo "+(MEMO_SCOPE[m.scope]||"("+m.scope+")")));
+    for(const c of db.categories||[]) if(HAS_OPTIONS(c.kind)) (c.options||[]).forEach((o,j)=>add("opt:"+c.id+":"+j, o, "opção de «"+c.name+"»"));
+    (db.doc_values||[]).forEach((v,i)=>{ const c=cats.get(v.category_id);
+      if(c && (c.kind==="text" || c.kind==="date")) add("val:"+i, v.value, "«"+c.name+"» de «"+(dname.get(v.document_id)||"?")+"»"); });
+    (db.links||[]).forEach((l,i)=>add("link:"+i, l.comment, "comentário de conexão"));
+    add("project", db._meta?.name, "nome do projeto");
+    return segs;
+  }
+
+  const uuid = () => globalThis.crypto?.randomUUID ? crypto.randomUUID()
+    : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+  // chaves que guardam identificador ou enumeração, não texto
+  const SKIP_KEY = /^(?:id|.*_id|op|scope|kind|layer|source|mode|direction|screen|format|at|created_at|updated_at|target_kind|origin_kind|role|active|project_id)$/;
+  function deepSubst(x, S, key){
+    if(typeof x==="string"){
+      if(key && SKIP_KEY.test(key)) return x;
+      if(/^\s*[[{]/.test(x)){ try{ return JSON.stringify(deepSubst(JSON.parse(x), S)); }catch(_){ } }
+      return S(x);
+    }
+    if(Array.isArray(x)) return x.map(v=>deepSubst(v, S, key));
+    if(x && typeof x==="object"){ const o={}; for(const [k,v] of Object.entries(x)) o[k]=deepSubst(v, S, k); return o; }
+    return x;
+  }
+  const mergeRanges = rs => { const m=[]; for(const r of rs.slice().sort((a,b)=>a[0]-b[0])){ const l=m[m.length-1]; if(l && r[0]<=l[1]) l[1]=Math.max(l[1],r[1]); else m.push([...r]); } return m; };
+  const inside = (ms, s, e) => ms.some(([a,b]) => a<=s && e<=b);
+
+  function pushActivity(db, e, plan){
+    if(!Array.isArray(db.activity)) db.activity=[];
+    const base={ project_id:db._meta?.id||"file-project", created_at:plan.now, layer:null, actor:null, actor_name:plan.author, at:plan.now };
+    if(!db.activity.length) db.activity.push({ ...base, id:uuid(), op:"trail_started", target_kind:null, target_id:null, target_name:null, detail:{} });
+    db.activity.push({ ...base, id:uuid(), op:e.op, target_kind:e.target_kind??null, target_id:e.target_id??null, target_name:e.target_name??null, detail:e.detail||{} });
+  }
+
+  // o código de censura: um já existente (plan.code = id) ou a família "Censura (AnonLab)",
+  // com um subcódigo por tipo (a família não recebe trechos, como no QualiLab)
+  function censorTarget(db, plan){
+    const codes=db.codes;
+    const chosen = plan.code && plan.code!=="new" && codes.find(c=>c.id===plan.code && c.is_redaction);
+    if(chosen) return () => chosen.id;
+    const nextPos = () => codes.reduce((m,c)=>Math.max(m, (c.position??0)+1), 0);
+    let fam=codes.find(c=>!c.parent_id && c.name===RED_FAMILY && c.is_redaction);
+    if(!fam){
+      fam={ id:uuid(), position:nextPos(), parent_id:null, name:RED_FAMILY, hue:codes.filter(c=>!c.parent_id).length%14, depth:0,
+            hue_deg:-2, sat:null, is_redaction:true, pos_x:null, pos_y:null };
+      codes.push(fam);
+    }
+    const kids=new Map(codes.filter(c=>c.parent_id===fam.id).map(c=>[c.name,c]));
+    return prefix => {
+      const name=plan.typeName(prefix);
+      let k=kids.get(name);
+      if(!k){ k={ id:uuid(), position:nextPos(), parent_id:fam.id, name, hue:fam.hue, depth:(fam.depth||0)+1, hue_deg:-2, sat:null,
+                  is_redaction:true, pos_x:null, pos_y:null }; codes.push(k); kids.set(name,k); }
+      return k.id;
+    };
+  }
+
+  /* Monta a cópia. plan = {
+       mode: "censor" (o texto fica; trechos ganham o código de censura) | "destroy" (o texto vira rótulos),
+       meta: pseudonimizar o que a censura não alcança (no "destroy", sempre),
+       reps: Map(chave do segmento -> [{start,end,label,prefix}]) em offsets do texto ORIGINAL,
+       subst: texto -> texto (troca os valores aceitos onde não houve detecção: nomes de código, IA, histórico),
+       code: "new" | id de um código de censura existente, typeName: prefixo -> nome do subcódigo,
+       author, now } */
+  function buildQualilab(src, plan){
+    const { snapshots, ...rest }=src.db;             // espelho = cópia inteira do projeto: nem copia
+    const db=structuredClone(rest), destroy=plan.mode==="destroy", meta=destroy || plan.meta;
+    const S=plan.subst || (x=>x), R=k=>plan.reps.get(k)||[];
+    const rep=(k,s)=>{ const r=R(k); return r.length ? replaceSpans(s, r).text : s; };
+    const st={ coded:0, already:0, docsEdited:0, remapped:0, affected:0, pdfsDropped:0, snapshotsDropped:0, metaEdited:0, otherDropped:0 };
+    const set=(o, f, v)=>{ if(v!==o[f]){ o[f]=v; st.metaEdited++; } };
+
+    if(meta){
+      for(const d of db.documents) if(d.name!=null) set(d, "name", rep("name:"+d.id, String(d.name)));
+      db.memos.forEach((m,i)=>{ if(m.content!=null) set(m, "content", rep("memo:"+i, String(m.content))); if(m.label) m.label=S(m.label); });
+      const optMap=new Map(), kind=new Map();
+      for(const c of db.categories){
+        kind.set(c.id, c.kind);
+        if(c.name) c.name=S(c.name);
+        if(c.description) c.description=S(c.description);
+        if(HAS_OPTIONS(c.kind) && Array.isArray(c.options)){
+          const mp=new Map();
+          const opts=c.options.map((o,j)=>{ const n=rep("opt:"+c.id+":"+j, String(o)); mp.set(String(o), n); return n; });
+          optMap.set(c.id, mp); c.options=[...new Set(opts)];
+        }
+      }
+      db.doc_values.forEach((v,i)=>{
+        if(v.value==null) return;
+        const k=kind.get(v.category_id), s=String(v.value), mp=optMap.get(v.category_id);
+        const one=x=>mp?.get(x) ?? S(x);
+        set(v, "value", k==="text"||k==="date" ? rep("val:"+i, s)
+          : k==="checkbox" ? s.split(MULTI_SEP).map(x=>one(x.trim())).join(MULTI_SEP)
+          : k==="select"||k==="single" ? one(s) : s);
+      });
+      (db.links||[]).forEach((l,i)=>{ if(l.comment) set(l, "comment", rep("link:"+i, String(l.comment))); });
+      for(const c of db.codes) if(c.name) c.name=S(c.name);
+      for(const r of db.link_relations||[]) if(r.name) r.name=S(r.name);
+      if(db._meta?.name) db._meta.name=rep("project", String(db._meta.name));
+      for(const k of ["ia_results","ia_memory","activity"]) if(db[k]) db[k]=deepSubst(db[k], S);
+      for(const k of Object.keys(db)) if(!KNOWN.has(k)) db[k]=deepSubst(db[k], S);   // versão mais nova do QualiLab
+    }
+    // espelhos são cópias inteiras do projeto (texto e títulos originais); o QualiLab também não os exporta
+    if(Array.isArray(snapshots)) st.snapshotsDropped=snapshots.length;
+
+    const byDoc=new Map();
+    for(const c of db.codings){ const a=byDoc.get(c.document_id); if(a) a.push(c); else byDoc.set(c.document_id,[c]); }
+    if(!destroy){
+      const red=new Set(db.codes.filter(c=>c.is_redaction).map(c=>c.id));
+      const target=censorTarget(db, plan);
+      for(const d of db.documents){
+        const reps=R("doc:"+d.id); if(!reps.length) continue;
+        const cov=mergeRanges((byDoc.get(d.id)||[]).filter(c=>red.has(c.code_id) && c.span_end>c.span_start).map(c=>[c.span_start,c.span_end]));
+        for(const r of reps){
+          if(inside(cov, r.start, r.end)){ st.already++; continue; }
+          db.codings.push({ id:uuid(), document_id:d.id, code_id:target(r.prefix), span_start:r.start, span_end:r.end,
+            quote:d.content.slice(r.start, r.end), layer:"final", created_by:null, author_name:plan.author,
+            created_at:plan.now, pdf_region:null, source:"manual" });
+          st.coded++;
+        }
+      }
+      if(st.coded) pushActivity(db, { op:"bulk_coding", target_kind:"project", target_id:db._meta?.id||"file-project",
+        detail:{ screen:"AnonLab", applied:st.coded } }, plan);
+    } else {
+      const dis=new Map();
+      for(const x of db.disagreements||[]){ const a=dis.get(x.document_id); if(a) a.push(x); else dis.set(x.document_id,[x]); }
+      for(const d of db.documents){
+        if(d.has_pdf){ d.has_pdf=false; st.pdfsDropped++; }
+        const reps=R("doc:"+d.id); if(!reps.length) continue;
+        const res=replaceSpans(d.content, reps);
+        let remapped=0, affected=0;
+        for(const c of [...(byDoc.get(d.id)||[]), ...(dis.get(d.id)||[])]){
+          const s=res.mapStart(c.span_start), e=Math.max(s, res.mapEnd(c.span_end)), q=res.text.slice(s,e);
+          if(s!==c.span_start || e!==c.span_end) remapped++;
+          if(q!==d.content.slice(c.span_start, c.span_end)) affected++;
+          c.span_start=s; c.span_end=e; c.quote=q;
+        }
+        d.content=res.text; st.docsEdited++; st.remapped+=remapped; st.affected+=affected;
+        pushActivity(db, { op:"text_edited", target_kind:"document", target_id:d.id, target_name:d.name, detail:{ remapped, affected } }, plan);
+      }
+      for(const c of db.codings) if(c.pdf_region!=null) c.pdf_region=null;   // o PDF original não vai junto
+      st.otherDropped=src.other.size;
+    }
+    if(db._meta) db._meta.name=(db._meta.name||"Projeto")+(destroy ? " · pseudonimizado (AnonLab)" : " · censurado (AnonLab)");
+    return { db, stats:st };
+  }
+
+  // grava: JSON puro, ou zip se houver PDF (na censura o original vai junto; na destruição, não)
+  async function writeQualilab(db, src, mode){
+    const json=new TextEncoder().encode(JSON.stringify(db, null, 2));
+    if(mode==="destroy" || (!src.pdfs.size && !src.pdfIndex.size && !src.other.size)) return json;
+    return writeZip([{ name:"project.json", data:json },
+      ...[...src.pdfs].map(([id,b])=>({ name:"pdfs/"+id+".pdf", data:b, store:true })),
+      ...[...src.pdfIndex].map(([id,b])=>({ name:"pdfindex/"+id+".json", data:b })),
+      ...[...src.other].map(([n,b])=>({ name:n, data:b }))]);
+  }
+
+  return { decodeText, nfcView, toOrig, replaceSpans, sniffDelimiter, parseCSV, writeCSV, crc32, readZip, writeZip,
+           readQualilab, qualilabSegments, buildQualilab, writeQualilab, deepSubst, RED_FAMILY, HAS_OPTIONS, MULTI_SEP };
+})();
+</script>
+
 <script>
 "use strict";
 
@@ -679,11 +1072,12 @@ function findNames(text){
     const tokens=val.split(/\s+/);
     const first=tokens[0].toLowerCase();
     if(STOP.has(first)) continue;            // começa com palavra comum
-    // início de frase + palavra única => provavelmente não é nome
+    // início de frase + palavra única => provavelmente não é nome. Linha em branco também é
+    // começo (parágrafo novo, ou a fronteira entre células e documentos de um arquivo)
     if(tokens.length===1){
       let i=start-1; while(i>=0 && /\s/.test(text[i])) i--;
       const prev = i<0 ? "." : text[i];
-      if(".!?:;\n".includes(prev)) continue;
+      if(".!?:;".includes(prev) || /\n[ \t]*\n/.test(text.slice(i+1,start))) continue;
     }
     out.push({start, end:start+val.length, value:val});
   }
@@ -904,25 +1298,37 @@ function nerSpans(result, text){
   return spans;
 }
 
-/* o que o modelo achou num lugar é procurado no texto todo (o NER às vezes perde ocorrências) */
-function propagate(spans, text){
-  const out=[], seen=new Set();
-  for(const s of spans){
-    if(!PROPAGATE.has(s.prefix)) continue;
-    const vals=[s.value.trim()];
-    const core=/^(?:bairro|distrito(?:\s+de)?|munic[íi]pio\s+de|cidade\s+de)\s+(\p{Lu}.{2,})$/iu.exec(vals[0]);
-    if(core) vals.push(core[1]);                  // "bairro Eldorado" → também "Eldorado"
-    for(const v of vals){
-      if(v.length<3) continue;
-      const key=s.prefix+"::"+normKey(v); if(seen.has(key)) continue; seen.add(key);
-      const pat=v.split(/\s+/).map(escRe).join("\\s+");
-      const re=new RegExp("(?<![\\p{L}\\p{N}])"+pat+"(?![\\p{L}\\p{N}])","giu");
-      for(const m of text.matchAll(re)){
-        if(!/^\p{Lu}/u.test(m[0])) continue;     // "rosa" (cor) ≠ "Rosa"
-        out.push({...s, start:m.index, end:m.index+m[0].length, value:m[0], prec:s.prec-1, src:"modelo·texto"});
-      }
+/* procura vários valores de uma vez (sem diferenciar maiúsculas, com fronteira de palavra) e
+   devolve um span por ocorrência, copiado do molde do valor. Uma regex por bloco de valores,
+   não uma por valor: num CSV ou projeto grande são milhares. */
+function findValues(templates, text, patch, needUpper){
+  const byKey=new Map(), out=[];
+  for(const t of templates){ const k=normKey(t.value); if(k.length>=3 && !byKey.has(k)) byKey.set(k,t); }
+  const keys=[...byKey.keys()].sort((a,b)=>b.length-a.length);
+  for(let i=0;i<keys.length;i+=400){
+    const alt=keys.slice(i,i+400).map(k=>k.split(" ").map(escRe).join("\\s+")).join("|");
+    for(const m of text.matchAll(new RegExp("(?<![\\p{L}\\p{N}])(?:"+alt+")(?![\\p{L}\\p{N}])","giu"))){
+      const t=byKey.get(normKey(m[0]));
+      if(!t || (needUpper && !/^\p{Lu}/u.test(m[0]))) continue;     // "rosa" (cor) ≠ "Rosa"
+      out.push({...t, ...patch(t), start:m.index, end:m.index+m[0].length, value:m[0]});
     }
   }
+  return out;
+}
+
+/* o que o modelo achou num lugar é procurado no texto todo (o NER às vezes perde ocorrências) */
+function propagate(spans, text){
+  const byType=new Map();
+  for(const s of spans){
+    if(!PROPAGATE.has(s.prefix)) continue;
+    const list=byType.get(s.prefix) ?? byType.set(s.prefix,[]).get(s.prefix);
+    const v=s.value.trim();
+    list.push({...s, value:v});
+    const core=/^(?:bairro|distrito(?:\s+de)?|munic[íi]pio\s+de|cidade\s+de)\s+(\p{Lu}.{2,})$/iu.exec(v);
+    if(core) list.push({...s, value:core[1]});    // "bairro Eldorado" → também "Eldorado"
+  }
+  const out=[];
+  for(const list of byType.values()) out.push(...findValues(list, text, t=>({prec:t.prec-1, src:"modelo·texto"}), true));
   return out;
 }
 
@@ -967,12 +1373,88 @@ function syncNerDetectors(){
 let ENTITIES=[];   // entidades agrupadas, com .accepted
 let SRCTEXT="";
 let DETECT_SEQ=0;
+let SOURCE=null;   // arquivo aberto: null = texto colado; {kind:"csv"|"qualilab", ...}
+let SEGS=[];       // pedaços de SRCTEXT: [{start, end, view, key, where}] (texto colado: um só)
+let DETECTED=null; // o SOURCE da última detecção (a saída só vale para ele)
+let STALE=false;   // colunas do CSV mudaram depois da detecção
+// entre segmentos. O ponto importa: quebra de linha o tokenizador ignora, e o modelo lia o
+// telefone de uma célula e a idade da seguinte como um número só. Nada atravessa (clipToSegments).
+const SEP="\n\n.\n\n";
+
+// Os textos do arquivo viram um só SRCTEXT: os detectores e o modelo rodam uma vez, e o mesmo
+// nome recebe o mesmo rótulo em todas as células/documentos.
+function buildCorpus(){
+  if(!SOURCE){
+    const text=$("#input").value.normalize("NFC");   // "João" decomposto (NFD) quebraria listas e o modelo
+    return {text, segs:[{start:0, end:text.length, view:{text, starts:null}, key:"text", where:""}]};
+  }
+  const segs=[]; let text="";
+  for(const s of sourceSegments()){
+    const view=Formats.nfcView(s.text);              // a saída volta aos offsets do original
+    if(segs.length) text+=SEP;
+    segs.push({...s, view, start:text.length, end:text.length+view.text.length});
+    text+=view.text;
+  }
+  return {text, segs};
+}
+function sourceSegments(){
+  if(SOURCE.kind==="qualilab") return Formats.qualilabSegments(SOURCE.src.db);
+  const out=[], rows=SOURCE.csv.rows;               // CSV: célula a célula; colunas "manter" ficam de fora
+  for(let r=SOURCE.header?1:0; r<rows.length; r++) rows[r].forEach((cell,c)=>{
+    const col=colInfo(c);
+    if(col.mode==="keep" || !cell.v.trim()) return;
+    out.push({key:r+":"+c, text:cell.v, r, c, col:col.mode, where:"linha "+(r+1)+" · "+col.name});
+  });
+  return out;
+}
+function segAt(pos){
+  let lo=0, hi=SEGS.length-1;
+  while(lo<hi){ const mid=(lo+hi+1)>>1; if(SEGS[mid].start<=pos) lo=mid; else hi=mid-1; }
+  return lo;
+}
+// o que atravessa a fronteira entre células/documentos vira um pedaço de cada lado ("Maria" no
+// fim de uma célula e "Silva" no começo da outra não são a mesma pessoa, mas os dois saem).
+// Número do modelo que atravessa fica só no pedaço onde começou (o resto é a célula vizinha).
+function clipToSegments(spans){
+  if(SEGS.length<2) return spans;
+  const out=[];
+  for(const s of spans){
+    let i=segAt(s.start);
+    if(SEGS[i].start<=s.start && s.end<=SEGS[i].end){ out.push(s); continue; }
+    const firstOnly=s.src.startsWith("modelo") && !TEXT_TYPES.has(s.prefix);
+    for(; i<SEGS.length && SEGS[i].start<s.end; i++){
+      let a=Math.max(s.start,SEGS[i].start), b=Math.min(s.end,SEGS[i].end);
+      while(a<b && /\s/.test(SRCTEXT[a])) a++;
+      while(b>a && /\s/.test(SRCTEXT[b-1])) b--;
+      if(b>a && /[\p{L}\p{N}]/u.test(SRCTEXT.slice(a,b))){ out.push({...s, start:a, end:b, value:SRCTEXT.slice(a,b)}); if(firstOnly) break; }
+    }
+  }
+  return out;
+}
+// CSV: coluna inteira de um tipo ("nome", "e-mail"): cada célula é um candidato, e o mesmo valor é
+// procurado no resto do arquivo (o nome da coluna "nome" que aparece numa resposta aberta)
+function columnSpans(){
+  if(SOURCE?.kind!=="csv") return [];
+  const out=[];
+  for(const g of SEGS){
+    if(g.col==="detect") continue;
+    let a=g.start, b=g.end;
+    while(a<b && /\s/.test(SRCTEXT[a])) a++;
+    while(b>a && /\s/.test(SRCTEXT[b-1])) b--;
+    if(b>a) out.push({start:a, end:b, value:SRCTEXT.slice(a,b), prefix:g.col, type:"coluna «"+colInfo(g.c).name+"»",
+      conf:"alta", prec:96, src:"coluna", sensivel:false});
+  }
+  for(const p of new Set(out.map(s=>s.prefix)))
+    out.push(...findValues(out.filter(s=>s.prefix===p), SRCTEXT, ()=>({prec:95, src:"coluna·texto"}), TEXT_TYPES.has(p)));
+  return out;
+}
 
 async function detect(){
-  const text = $("#input").value.normalize("NFC");   // "João" decomposto (NFD) quebraria listas e o modelo
-  if(!text.trim()){ alert("Cole um texto primeiro (ou clique Exemplo)."); return; }
+  if(!SOURCE && !$("#input").value.trim()){ alert("Cole um texto primeiro (ou clique Exemplo)."); return; }
   const seq=++DETECT_SEQ;
-  SRCTEXT=text;
+  const corpus=buildCorpus();
+  if(!corpus.text.trim()){ alert(SOURCE?.kind==="csv" ? "Nenhuma coluna com texto para analisar (todas em \"manter\"?)." : "O arquivo não tem texto para analisar."); return; }
+  SRCTEXT=corpus.text; SEGS=corpus.segs; DETECTED=SOURCE; STALE=false;
 
   // 1) coletar spans de todos os detectores ligados
   let spans=[];
@@ -981,8 +1463,8 @@ async function detect(){
     for(const s of d.find(SRCTEXT))
       spans.push({...s, prefix:d.prefix, type:d.label, conf:d.conf, prec:d.prec, src:d.src, sensivel:!!d.sensivel});
   }
-  // termos livres
-  spans.push(...findFreeTerms(SRCTEXT));
+  // termos livres e colunas inteiras (CSV)
+  spans.push(...findFreeTerms(SRCTEXT), ...columnSpans());
 
   // 1b) modelo de linguagem (assíncrono, num worker). Se ainda está carregando, espera.
   $("#run-info").textContent="";
@@ -1009,27 +1491,53 @@ async function detect(){
     }finally{ if(seq===DETECT_SEQ) busy(false); }
   }
 
-  // 2) resolver sobreposição: precedência desc, depois comprimento desc
+  if(!NER.ready()) $("#run-info").textContent="Sem o modelo de linguagem (cartão 3), nomes vêm só da heurística: confiança baixa, desmarcados. Revise ou carregue o modelo.";
+  spans=clipToSegments(spans);
+
+  // 2) resolver sobreposição: precedência desc, depois comprimento desc. owner[i] = índice do
+  //    span mantido que cobre o caractere i (-1: livre); sem ele, isto é quadrático e um
+  //    projeto grande trava.
   spans.sort((a,b)=> b.prec-a.prec || (b.end-b.start)-(a.end-a.start) || a.start-b.start);
+  const owner=new Int32Array(SRCTEXT.length).fill(-1);
   const kept=[];
+  const owners=(a,b)=>{ const o=new Set(); for(let i=a;i<b;i++) if(owner[i]>=0) o.add(owner[i]); return o; };
   for(const s of spans){
-    if(!kept.some(k => s.start < k.end && k.start < s.end)) kept.push(s);
+    let free=true;
+    for(let i=s.start;i<s.end;i++) if(owner[i]>=0){ free=false; break; }
+    if(!free) continue;
+    owner.fill(kept.length, s.start, s.end);
+    kept.push(s);
   }
 
   // 2a) descartado do mesmo tipo que estende um mantido ("Geraldo" do modelo + "Geraldo
   //     Figueiredo" da heurística): vale a união, senão o sobrenome escapa. Pronome de
   //     tratamento na ponta ("Dona", "Sr.") fica de fora.
-  const keptSet=new Set(kept);
+  const keptSet=new Set(kept), dead=new Set();
   for(const d of spans){
     if(keptSet.has(d) || !TEXT_TYPES.has(d.prefix)) continue;
-    const over=kept.filter(k => d.start < k.end && k.start < d.end);
-    if(over.length!==1 || over[0].prefix!==d.prefix) continue;
-    const k=over[0];
+    const over=owners(d.start,d.end);
+    if(over.size>1){
+      // o valor inteiro, achado noutro lugar ("Tal, Qual & Associados"), cobre pedaços do mesmo
+      // tipo que o modelo separou aqui ("Tal" + "Qual & Associados"): vale o inteiro, e o mesmo
+      // escritório não sai com dois rótulos
+      const ks=[...over].map(o=>kept[o]);
+      if(!/^(?:modelo|coluna)/.test(d.src) || d.prec<Math.max(...ks.map(k=>k.prec))-1) continue;
+      if(!ks.every(k=>k.prefix===d.prefix && d.start<=k.start && k.end<=d.end)) continue;
+      const k0=[...over].reduce((a,b)=>kept[a].start<=kept[b].start?a:b);
+      for(const o of over) if(o!==k0) dead.add(o);
+      owner.fill(k0, d.start, d.end);
+      Object.assign(kept[k0], {start:d.start, end:d.end, value:SRCTEXT.slice(d.start,d.end)});
+      continue;
+    }
+    if(over.size!==1) continue;
+    const ki=[...over][0], k=kept[ki];
+    if(k.prefix!==d.prefix) continue;
     let ns=Math.min(k.start,d.start), ne=Math.max(k.end,d.end);
     const left=SRCTEXT.slice(ns,k.start), right=SRCTEXT.slice(k.end,ne);
     if(ns<k.start && (TITLE_RE.test(left) || (k.prefix==="PESSOA" && !NAME_EXT_RE.test(left)))) ns=k.start;
     if(ne>k.end && (TITLE_RE.test(right) || (k.prefix==="PESSOA" && !NAME_EXT_RE.test(right)))) ne=k.end;
-    if((ns===k.start && ne===k.end) || kept.some(o => o!==k && ns < o.end && o.start < ne)) continue;
+    if((ns===k.start && ne===k.end) || [...owners(ns,ne)].some(o=>o!==ki)) continue;
+    owner.fill(ki, ns, ne);
     k.start=ns; k.end=ne; k.value=SRCTEXT.slice(ns,ne);
   }
 
@@ -1039,7 +1547,8 @@ async function detect(){
   const compat=(a,b)=>a===b || (PLACE_TYPES.has(a) && PLACE_TYPES.has(b));
   for(const d of spans){
     if(keptSet.has(d)) continue;
-    for(const k of kept){
+    for(const ki of owners(d.start,d.end)){
+      const k=kept[ki];
       if(!compat(k.prefix,d.prefix)) continue;
       if(!((k.start<=d.start && d.end<=k.end) || (d.start<=k.start && k.end<=d.end))) continue;
       (k.also ??= new Set()).add(d.src);
@@ -1048,17 +1557,19 @@ async function detect(){
     }
   }
 
+  const alive=kept.filter((_,i)=>!dead.has(i));   // sem os pedaços absorvidos em 2a
+
   // 2b) mesmo texto, mesmo tipo: vale o tipo do span de maior precedência ("Recife" não vira LOCAL aqui e CIDADE ali)
   const bestType=new Map();
-  for(const s of kept) if(TEXT_TYPES.has(s.prefix)){
+  for(const s of alive) if(TEXT_TYPES.has(s.prefix)){
     const k=normKey(s.value), b=bestType.get(k);
     if(!b || s.prec>b.prec) bestType.set(k,s);
   }
-  for(const s of kept) if(TEXT_TYPES.has(s.prefix)) s.prefix=bestType.get(normKey(s.value)).prefix;
+  for(const s of alive) if(TEXT_TYPES.has(s.prefix)) s.prefix=bestType.get(normKey(s.value)).prefix;
 
   // 3) agrupar em entidades (numéricos: chave por dígitos; texto: por minúsculas)
   const map=new Map();
-  for(const s of kept){
+  for(const s of alive){
     const numKey=/^(CPF|CNPJ|TEL|CEP|CARTAO|CNS|TITULO|RG|IP|PLACA|PROCESSO)$/.test(s.prefix);
     const key = s.prefix+"::"+(numKey?onlyDigits(s.value):normKey(s.value));
     if(!map.has(key)) map.set(key,{prefix:s.prefix,type:s.type,conf:s.conf,sensivel:s.sensivel,value:s.value,spans:[],srcs:new Set(),score:0});
@@ -1096,11 +1607,18 @@ function findFreeTerms(text){
 
 /* ===================== revisão (KWIC) ===================== */
 function kwic(text, start, end){
-  const W=42;
-  const a=escHtml(text.slice(Math.max(0,start-W),start)).replace(/\s+/g," ");
+  const W=42, g=SEGS.length>1 ? SEGS[segAt(start)] : {start:0, end:text.length};   // o contexto não vaza para a célula vizinha
+  const a0=Math.max(g.start,start-W), z1=Math.min(g.end,end+W);
+  const a=escHtml(text.slice(a0,start)).replace(/\s+/g," ");
   const m=escHtml(text.slice(start,end));
-  const z=escHtml(text.slice(end,end+W)).replace(/\s+/g," ");
-  return (start>W?"…":"")+a+"<mark>"+m+"</mark>"+z+(end+W<text.length?"…":"");
+  const z=escHtml(text.slice(end,z1)).replace(/\s+/g," ");
+  return (a0>g.start?"…":"")+a+"<mark>"+m+"</mark>"+z+(z1<g.end?"…":"");
+}
+// onde está (CSV: linha e coluna; QualiLab: documento, título, memo…)
+function locOf(e){
+  if(SEGS.length<2) return "";
+  const n=new Set(e.spans.map(s=>segAt(s.start))).size;
+  return SEGS[segAt(e.spans[0].start)].where + (n>1 ? ` · e em mais ${n-1} lugar${n>2?"es":""}` : "");
 }
 const CONFCOLOR={alta:"var(--c-alta)",media:"var(--c-media)",baixa:"var(--c-baixa)"};
 
@@ -1114,9 +1632,10 @@ function renderReview(){
     const viaModel=[...e.srcs].some(s=>s.startsWith("modelo"));
     const srcs=[...new Set([...e.srcs].map(s=>s.startsWith("modelo")?"modelo":s==="heurística"?"heur.":s))];
     const srcTitle = viaModel ? `modelo: ${Math.round(e.score*100)}% de confiança`+(e.srcs.has("modelo·texto")?" · também achado por busca no texto":"") : "";
+    const loc=locOf(e);
     it.innerHTML=`
       <input type="checkbox" data-i="${i}" ${e.accepted?"checked":""}>
-      <div class="kwic">${kwic(SRCTEXT,e.spans[0].start,e.spans[0].end)}</div>
+      <div><div class="kwic">${kwic(SRCTEXT,e.spans[0].start,e.spans[0].end)}</div>${loc?`<span class="loc" title="${escHtml(loc)}">${escHtml(loc)}</span>`:""}</div>
       <div class="meta">
         <span class="cnt">${e.spans.length}×</span>
         <span class="pill type">${e.prefix}</span>
@@ -1153,6 +1672,7 @@ function apply(){
     else { counter[e.prefix]=(counter[e.prefix]||0)+1; e.label="["+e.prefix+"_"+counter[e.prefix]+"]"; }
     CODEBOOK.push({label:e.label, original:e.value, tipo:e.prefix, ocorrencias:e.spans.length});
   }
+  if(SOURCE){ renderOutput(); return; }
   // coletar spans aceitos, ordenar, reconstruir
   const spans=[];
   for(const e of accepted) for(const s of e.spans) spans.push({start:s.start,end:s.end,label:e.label});
@@ -1163,11 +1683,226 @@ function apply(){
   $("#output").value=out;
 }
 
-function download(name,text){
-  const blob=new Blob([text],{type:"text/plain;charset=utf-8"});
+// trechos aceitos por segmento, em offsets do texto ORIGINAL do segmento (antes do NFC)
+function segReps(){
+  const spans=[];
+  for(const e of ENTITIES) if(e.accepted) for(const s of e.spans) spans.push({start:s.start, end:s.end, label:e.label, prefix:e.prefix});
+  spans.sort((a,b)=>a.start-b.start);
+  const by=new Map(); let cur=-1;
+  for(const s of spans){
+    if(s.start<cur) continue; cur=s.end;
+    const i=segAt(s.start), g=SEGS[i];
+    const list=by.get(i) ?? by.set(i,[]).get(i);
+    list.push({start:Formats.toOrig(g.view, s.start-g.start, false), end:Formats.toOrig(g.view, s.end-g.start, true), label:s.label, prefix:s.prefix});
+  }
+  return by;
+}
+// o mesmo valor aceito, onde não houve detecção (nomes de código, conversas de IA, histórico)
+// (nome e lugar só com inicial maiúscula, como na propagação: o "Tal" de "Tal, Qual & Associados"
+// não é o "tal" da língua)
+function makeSubst(){
+  const lab=new Map();
+  for(const e of ENTITIES) if(e.accepted) for(const s of e.spans){
+    const k=normKey(s.value); if(k.length>=3 && !lab.has(k)) lab.set(k, {label:e.label, upper:TEXT_TYPES.has(e.prefix)});
+  }
+  const keys=[...lab.keys()].sort((a,b)=>b.length-a.length), res=[];
+  for(let i=0;i<keys.length;i+=400)
+    res.push(new RegExp("(?<![\\p{L}\\p{N}])(?:"+keys.slice(i,i+400).map(k=>k.split(" ").map(escRe).join("\\s+")).join("|")+")(?![\\p{L}\\p{N}])","giu"));
+  const pick=m=>{ const x=lab.get(normKey(m)); return !x || (x.upper && !/^\p{Lu}/u.test(m)) ? m : x.label; };
+  return str=>{ let s=String(str); for(const re of res) s=s.replace(re, pick); return s; };
+}
+
+/* ---- saída de CSV e QualiLab ---- */
+const TYPE_NAMES={PESSOA:"Pessoas",ORG:"Organizações",LOCAL:"Locais",CIDADE:"Cidades",ESTADO:"Estados",PAIS:"Países",ENDERECO:"Endereços",
+  CPF:"CPF",CNPJ:"CNPJ",RG:"RG",CNS:"Cartão SUS",PROCESSO:"Processos",REGISTRO:"Registros profissionais",PRONTUARIO:"Prontuários",
+  SIAPE:"SIAPE",PLACA:"Placas",TITULO:"Títulos de eleitor",EMAIL:"E-mails",TEL:"Telefones",CEP:"CEPs",URL:"Sites",REDE:"Redes sociais",
+  IP:"IPs",CARTAO:"Cartões",CONTA:"Contas bancárias",VALOR:"Valores",DATA:"Datas",IDADE:"Idades",TERMO:"Termos livres",
+  EVENTO:"Eventos",OBRA:"Obras",ID:"Identificadores"};
+const qlMode=()=>document.querySelector("input[name=qlmode]:checked")?.value || "censor";
+function qualilabPlan(){
+  const reps=new Map();
+  for(const [i,list] of segReps()) reps.set(SEGS[i].key, list);
+  return { mode:qlMode(), meta:$("#ql-meta")?.checked ?? true, reps, subst:makeSubst(), code:$("#ql-code")?.value || "new",
+           typeName:p=>TYPE_NAMES[p] || p, author:"AnonLab", now:new Date().toISOString() };
+}
+function csvOutput(maxRows=Infinity){
+  const rows=SOURCE.csv.rows, lim=Math.min(rows.length, maxRows);
+  const out={...SOURCE.csv, rows:rows.slice(0,lim).map(r=>r.map(c=>({...c})))};
+  if(lim<rows.length) out.trailingEOL=false;
+  for(const [i,list] of segReps()){ const g=SEGS[i]; if(g.r<lim){ const cell=out.rows[g.r][g.c]; cell.v=Formats.replaceSpans(cell.v, list).text; } }
+  return Formats.writeCSV(out, SOURCE.delim);
+}
+const PREVIEW_MAX=300000;
+function renderOutput(){
+  const info=$("#out-info"), ok=DETECTED===SOURCE && !STALE;
+  if(!ok){ $("#output").value=""; info.hidden=false; info.textContent="Clique em Detectar candidatos para ver o resultado."; return; }
+  const n=ENTITIES.filter(e=>e.accepted).reduce((a,e)=>a+e.spans.length,0);
+  if(SOURCE.kind==="csv"){
+    const rows=SOURCE.csv.rows.length, show=Math.min(rows,300);
+    $("#output").value=csvOutput(show)+(show<rows?SOURCE.csv.eol+"…":"");
+    info.hidden=false;
+    info.textContent=`${n} substituição(ões). `+(show<rows ? `Prévia: as primeiras ${show} de ${rows} linhas; o arquivo baixado tem tudo.` : `Prévia do arquivo inteiro (${rows} linhas, com o cabeçalho).`);
+    return;
+  }
+  const plan=qualilabPlan(), db=SOURCE.src.db, destroy=plan.mode==="destroy", meta=destroy || plan.meta;
+  const R=k=>plan.reps.get(k)||[];
+  let body=0, docs=0, other=0, out="";
+  for(const [k,l] of plan.reps){ if(k.startsWith("doc:")){ body+=l.length; docs++; } else other+=l.length; }
+  for(const d of db.documents){
+    const reps=R("doc:"+d.id), name=meta ? Formats.replaceSpans(String(d.name||""), R("name:"+d.id)).text : d.name;
+    // destruir: o texto novo; censurar: █ onde o QualiLab vai mascarar (mesmo comprimento)
+    const text=Formats.replaceSpans(String(d.content||""), destroy ? reps : reps.map(r=>({...r, label:"█".repeat(r.end-r.start)}))).text;
+    out+="═══ "+name+" ═══\n"+text+"\n\n";
+    if(out.length>PREVIEW_MAX){ out=out.slice(0,PREVIEW_MAX)+"\n… (prévia cortada; o arquivo baixado tem tudo)"; break; }
+  }
+  $("#output").value=out;
+  info.hidden=false;
+  info.textContent = (destroy
+      ? `Destruir: ${body} trecho(s) trocado(s) no texto de ${docs} documento(s); os trechos codificados são reancorados.`
+      : `Censurar: ${body} trecho(s) em ${docs} documento(s) recebem o código de censura; o texto fica intacto (█ = o que o QualiLab mascara).`)
+    + (meta ? ` Títulos, memos e valores: ${other} troca(s).` : " Títulos, memos e valores ficam como estão.");
+}
+function stem(name){ return name.replace(/\.[^.]+$/,""); }
+// monta o arquivo de saída (sem baixar): também usado pelos testes (tests/harness.html)
+async function buildOutput(){
+  if(!SOURCE) return {name:"documento_anonimizado.txt", bytes:new TextEncoder().encode($("#output").value||""), type:"text/plain;charset=utf-8"};
+  if(SOURCE.kind==="csv"){
+    const body=new TextEncoder().encode(csvOutput());
+    // UTF-8 sempre; com BOM se o original tinha, ou se era Windows-1252 (o Excel reconhece)
+    let bytes=body;
+    if(SOURCE.bom || SOURCE.encoding!=="utf-8"){ bytes=new Uint8Array(body.length+3); bytes.set([0xEF,0xBB,0xBF]); bytes.set(body,3); }
+    return {name:stem(SOURCE.name)+"_anonimizado.csv", bytes, type:"text/csv;charset=utf-8"};
+  }
+  const plan=qualilabPlan();
+  const {db, stats}=Formats.buildQualilab(SOURCE.src, plan);
+  const bytes=await Formats.writeQualilab(db, SOURCE.src, plan.mode);
+  return {name:stem(SOURCE.name)+(plan.mode==="destroy"?"_pseudonimizado":"_censurado")+".qualilab", bytes, type:"application/octet-stream", stats, db};
+}
+async function downloadOutput(){
+  if(SOURCE && (DETECTED!==SOURCE || STALE)){ alert(STALE ? "As colunas mudaram: clique em Detectar candidatos de novo." : "Clique em Detectar candidatos primeiro."); return; }
+  try{
+    const o=await buildOutput();
+    downloadBlob(o.name, new Blob([o.bytes],{type:o.type}));
+    if(o.stats){
+      const s=o.stats, parts=[];
+      if(s.coded) parts.push(`${s.coded} trecho(s) censurado(s)`);
+      if(s.already) parts.push(`${s.already} já estavam censurados`);
+      if(s.docsEdited) parts.push(`${s.docsEdited} documento(s) reescrito(s), ${s.remapped} trecho(s) codificado(s) reancorado(s)`);
+      if(s.metaEdited) parts.push(`${s.metaEdited} título(s)/memo(s)/valor(es) pseudonimizado(s)`);
+      if(s.pdfsDropped) parts.push(`${s.pdfsDropped} PDF(s) original(is) removido(s) (têm o texto cru)`);
+      if(s.snapshotsDropped) parts.push(`${s.snapshotsDropped} espelho(s) removido(s)`);
+      $("#out-info").textContent="Baixado "+o.name+": "+(parts.join("; ")||"nada a mudar")+".";
+    }
+  }catch(e){ alert("Não consegui gerar o arquivo: "+e.message); console.error(e); }
+}
+
+function download(name,text){ downloadBlob(name, new Blob([text],{type:"text/plain;charset=utf-8"})); }
+function downloadBlob(name, blob){
   const a=document.createElement("a");
   a.href=URL.createObjectURL(blob); a.download=name; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+
+/* ===================== arquivo aberto: CSV e QualiLab ===================== */
+const COLUMN_TYPES={PESSOA:"pessoa",EMAIL:"e-mail",CPF:"CPF",CNPJ:"CNPJ",TEL:"telefone",ENDERECO:"endereço",CEP:"CEP",CIDADE:"cidade",
+  LOCAL:"local",ORG:"organização",DATA:"data",RG:"RG",ID:"identificador"};
+function colInfo(c){ return SOURCE.cols[c] ?? {name:"coluna "+(c+1), mode:"detect"}; }
+// o que a coluna provavelmente é, pelo cabeçalho (e, para e-mail e CPF, pelo conteúdo)
+function guessColumn(header, vals){
+  const h=header.normalize("NFD").replace(/\p{M}/gu,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+  if(/\b(e ?mail|correio eletronico)\b/.test(h)) return "EMAIL";
+  if(/\bcpf\b/.test(h)) return "CPF";
+  if(/\bcnpj\b/.test(h)) return "CNPJ";
+  if(/\b(telefone|celular|fone|whatsapp|tel|phone)\b/.test(h)) return "TEL";
+  if(/\bcep\b/.test(h)) return "CEP";
+  if(/\b(endereco|logradouro|address)\b/.test(h)) return "ENDERECO";
+  if(/^(rg|identidade|numero do rg)$/.test(h)) return "RG";
+  if(/^(nome|nome completo|nome social|sobrenome|name|full name|first name|last name|surname|participante|entrevistad[oa]|respondente|paciente|nome d[oa] (participante|entrevistad[oa]|respondente|paciente|aluno|aluna|responsavel))$/.test(h)) return "PESSOA";
+  if(/\b(nascimento|data de nascimento|dt nasc)\b/.test(h)) return "DATA";
+  if(/^(carimbo de data hora|timestamp|data hora|submitted at|start date|end date)$/.test(h)) return "keep";
+  const ne=vals.map(v=>v.trim()).filter(Boolean);
+  if(ne.length>=3){
+    const frac=f=>ne.filter(f).length/ne.length;
+    if(frac(v=>/^[\w.+-]+@[\w-]+\.[\w.-]+$/.test(v))>=0.9) return "EMAIL";
+    if(frac(validCPF)>=0.9) return "CPF";
+  }
+  return "detect";
+}
+function csvColumns(){
+  const rows=SOURCE.csv.rows, ncol=rows.reduce((m,r)=>Math.max(m,r.length),0), h=SOURCE.header;
+  return [...Array(ncol)].map((_,c)=>{
+    const name=(h && rows[0][c]?.v.trim()) || "coluna "+(c+1);
+    const vals=rows.slice(h?1:0, 300).map(r=>r[c]?.v || "");
+    return {name, mode:h ? guessColumn(name, vals) : "detect", ex:vals.find(v=>v.trim()) || ""};
+  });
+}
+const plural=(n,s,p)=>n+" "+(n===1?s:p);
+function renderSource(){
+  const box=$("#source"), inp=$("#input");
+  box.hidden=!SOURCE; inp.hidden=!!SOURCE;
+  $("#dl").textContent = !SOURCE ? "Baixar .txt" : SOURCE.kind==="csv" ? "Baixar .csv" : "Baixar .qualilab";
+  $("#out-info").hidden=true;
+  if(!SOURCE){ box.innerHTML=""; $("#charcount").textContent=inp.value.length+" caracteres"; return; }
+  const head=(icon, sub)=>`<div class="src-head"><div><b>${icon} ${escHtml(SOURCE.name)}</b><div class="sub">${sub}</div></div>
+    <button class="ghost sm" id="src-close" title="Fechar o arquivo e voltar ao texto colado">✕</button></div>`;
+  if(SOURCE.kind==="csv"){
+    const {csv, delim, cols}=SOURCE, dn={";":"ponto e vírgula",",":"vírgula","\t":"tabulação","|":"barra vertical"}[delim];
+    const opts=m=>`<option value="detect"${m==="detect"?" selected":""}>detectar no texto</option><option value="keep"${m==="keep"?" selected":""}>manter como está</option>`
+      + Object.entries(COLUMN_TYPES).map(([k,l])=>`<option value="${k}"${m===k?" selected":""}>inteira é ${l}</option>`).join("");
+    box.innerHTML=head("📊", `CSV · ${dn} · ${plural(csv.rows.length-(SOURCE.header?1:0),"linha","linhas")} · ${plural(cols.length,"coluna","colunas")}${SOURCE.encoding!=="utf-8"?" · Windows-1252 (sai em UTF-8)":""}`)
+      + `<label class="chk" style="margin-top:6px"><input type="checkbox" id="csv-header"${SOURCE.header?" checked":""}> primeira linha é cabeçalho</label>
+      <table class="cols">${cols.map((c,i)=>`<tr><td><div class="cn" title="${escHtml(c.name)}">${escHtml(c.name)}</div><div class="ex" title="${escHtml(c.ex)}">${escHtml(c.ex)||"&nbsp;"}</div></td><td><select data-c="${i}" aria-label="${escHtml(c.name)}">${opts(c.mode)}</select></td></tr>`).join("")}</table>
+      <p class="note">"Inteira é…": a célula toda vira um rótulo (<code>[PESSOA_1]</code>), e o mesmo valor é trocado onde mais aparecer. "Manter": a coluna não é tocada.</p>`;
+    box.querySelector("#csv-header").addEventListener("change",e=>{ SOURCE.header=e.target.checked; SOURCE.cols=csvColumns(); renderSource(); markStale(); });
+    box.querySelectorAll("select[data-c]").forEach(s=>s.addEventListener("change",()=>{ SOURCE.cols[+s.dataset.c].mode=s.value; markStale(); }));
+  } else {
+    const db=SOURCE.src.db, red=db.codes.filter(c=>c.is_redaction);
+    const leaves=red.filter(c=>!db.codes.some(x=>x.parent_id===c.id));
+    const path=c=>{ const p=[]; let x=c, n=0; while(x && n++<50){ p.unshift(x.name); x=db.codes.find(y=>y.id===x.parent_id); } return p.join(" ▸ "); };
+    const pdfs=db.documents.filter(d=>d.has_pdf).length;
+    box.innerHTML=head("🧪", `QualiLab · ${plural(db.documents.length,"documento","documentos")} · ${plural(db.codings.length,"trecho codificado","trechos codificados")} · ${plural(db.memos.length,"memo","memos")}${pdfs?" · "+plural(pdfs,"PDF","PDFs"):""}${red.length?" · já usa censura":""}`)
+      + `<div style="margin-top:8px">
+      <label class="chk"><input type="radio" name="qlmode" value="censor" checked><span><b>Censurar</b>: o texto fica intacto; cada achado recebe o código de censura do QualiLab (⦸) e sai mascarado nos relatórios e no que vai para a IA.</span></label>
+      <label class="chk"><input type="radio" name="qlmode" value="destroy"><span><b>Destruir</b>: os pseudônimos (<code>[PESSOA_1]</code>) entram no próprio texto, e os trechos codificados são reancorados. Não tem volta${pdfs?"; os PDFs originais não vão junto":""}.</span></label>
+      <label class="sub" id="ql-code-row" style="display:block;margin:4px 0 2px">código de censura
+        <select id="ql-code" style="max-width:100%"><option value="new">novo: ${escHtml(Formats.RED_FAMILY)}, um subcódigo por tipo</option>${leaves.map(c=>`<option value="${escHtml(c.id)}">${escHtml(path(c))}</option>`).join("")}</select></label>
+      <label class="chk"><input type="checkbox" id="ql-meta" checked><span>pseudonimizar também títulos, memos, valores de categoria, conversas de IA e histórico (a censura do QualiLab não os alcança)</span></label>
+      </div>`;
+    const sync=()=>{ const d=qlMode()==="destroy"; $("#ql-code-row").style.display=d?"none":"block"; const m=$("#ql-meta"); m.disabled=d; if(d) m.checked=true; apply(); };
+    box.querySelectorAll("input[name=qlmode]").forEach(r=>r.addEventListener("change",sync));
+    $("#ql-code").addEventListener("change",apply); $("#ql-meta").addEventListener("change",apply);
+  }
+  box.querySelector("#src-close").addEventListener("click",closeSource);
+  $("#charcount").textContent="";
+}
+function markStale(){ if(DETECTED===SOURCE && ENTITIES.length){ STALE=true; $("#run-info").textContent="⚠️ As colunas mudaram: clique em Detectar candidatos de novo."; renderOutput(); } }
+function resetResults(){
+  ENTITIES=[]; SRCTEXT=""; SEGS=[]; DETECTED=null; STALE=false; CODEBOOK=[];
+  $("#output").value=""; $("#run-info").textContent="";
+  $("#review").innerHTML='<div class="empty">Aperte <b>Detectar candidatos</b>. Os achados aparecem aqui, cada um com o trecho ao redor para você revisar.</div>';
+  updateStats();
+}
+function closeSource(){ SOURCE=null; resetResults(); renderSource(); }
+async function openFile(f){
+  const ext=(f.name.match(/\.([^.]+)$/)?.[1] || "").toLowerCase();
+  const u8=new Uint8Array(await f.arrayBuffer());
+  try{
+    if(ext==="qualilab" || (ext!=="csv" && ext!=="tsv" && ext!=="txt" && u8[0]===0x50 && u8[1]===0x4B)){
+      SOURCE={kind:"qualilab", name:f.name, src:await Formats.readQualilab(u8)};
+    } else if(ext==="csv" || ext==="tsv"){
+      const {text, encoding, bom}=Formats.decodeText(u8);
+      const delim = ext==="tsv" ? "\t" : Formats.sniffDelimiter(text);
+      const csv=Formats.parseCSV(text, delim);
+      if(!csv.rows.length) throw new Error("planilha vazia");
+      SOURCE={kind:"csv", name:f.name, csv, delim, encoding, bom, header:true};
+      SOURCE.cols=csvColumns();
+    } else {
+      SOURCE=null; resetResults(); renderSource();
+      $("#input").value=Formats.decodeText(u8).text; $("#input").dispatchEvent(new Event("input"));
+      return;
+    }
+    resetResults(); renderSource();
+  }catch(e){ alert("Não consegui abrir "+f.name+": "+e.message); console.error(e); }
 }
 
 /* ===================== NER: cliente do worker ===================== */
@@ -1546,15 +2281,17 @@ async function entriesFromDrop(dt){
 
 /* ===================== eventos ===================== */
 $("#input").addEventListener("input",()=>{ $("#charcount").textContent=$("#input").value.length+" caracteres"; });
-$("#file").addEventListener("change",e=>{
-  const f=e.target.files[0]; if(!f) return;
-  const r=new FileReader(); r.onload=()=>{ $("#input").value=r.result; $("#input").dispatchEvent(new Event("input")); }; r.readAsText(f,"utf-8");
-});
+$("#open-file").addEventListener("click",()=>$("#file").click());
+$("#file").addEventListener("change",e=>{ const f=e.target.files[0]; e.target.value=""; if(f) openFile(f); });
+const docCard=$("#doc-card");
+docCard.addEventListener("dragover",e=>{ if([...e.dataTransfer.types].includes("Files")){ e.preventDefault(); docCard.classList.add("drop"); } });
+docCard.addEventListener("dragleave",()=>docCard.classList.remove("drop"));
+docCard.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(!f) return; e.preventDefault(); docCard.classList.remove("drop"); openFile(f); });
 $("#detect").addEventListener("click",detect);
 $("#cancel").addEventListener("click",()=>NER.cancel());
 $("#apply").addEventListener("click",apply);
 $("#copy").addEventListener("click",()=>{ const o=$("#output"); o.select(); try{document.execCommand("copy");}catch(_){ } navigator.clipboard?.writeText(o.value).catch(()=>{}); });
-$("#dl").addEventListener("click",()=>download("documento_anonimizado.txt",$("#output").value||""));
+$("#dl").addEventListener("click",downloadOutput);
 $("#dl-key").addEventListener("click",()=>{
   if(!CODEBOOK.length){ alert("Nada para exportar ainda."); return; }
   if(!confirm("⚠️ O codebook REIDENTIFICA os dados. Baixe apenas se for guardá-lo em local seguro e separado. Continuar?")) return;
@@ -1593,6 +2330,7 @@ card.addEventListener("dragleave",()=>card.classList.remove("drop"));
 card.addEventListener("drop",async e=>{ e.preventDefault(); card.classList.remove("drop"); const en=await entriesFromDrop(e.dataTransfer); if(en.length) openNerPack(en); });
 
 $("#sample").addEventListener("click",()=>{
+  if(SOURCE) closeSource();
   $("#input").value=
 `Entrevista realizada em 12/03/2021 com João da Silva, 42 anos, morador de Recife, Pernambuco.
 Ele relatou que trabalhou com Maria Oliveira na empresa Tecidos Brasil Ltda.
@@ -1612,7 +2350,8 @@ buildCategories();
   $("#ner-auto").checked = auto!=="";
   if(auto==="hub") openNerHub(); }
 // para os testes automatizados (tests/harness.html); não expõe nada para fora da página
-window.AnonLab = {NER, NerCore, NER_HUB, detect, openNerPack, openNerHub, loadNerModel, entities:()=>ENTITIES};
+window.AnonLab = {NER, NerCore, NER_HUB, Formats, detect, openNerPack, openNerHub, loadNerModel, openFile, closeSource, buildOutput,
+  entities:()=>ENTITIES, source:()=>SOURCE};
 </script>
 </body>
 </html>

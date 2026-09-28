@@ -101,7 +101,39 @@ async function evalHub(models, host = "https://huggingface.co/"){
            excessos: r.docs.flatMap(d => d.excesso.map(v => d.id + " · " + v)) };
 }
 
-window.harness = { loadPack, evalGolden, openFakeHub, evalHub, app: () => document.getElementById("app").contentWindow,
+/* ---- arquivos (CSV / QualiLab) ---- */
+// abre tests/fixtures/<nome> pelo mesmo caminho do botão "Abrir arquivo" (ou um File/Blob pronto)
+async function openFixture(name, blob){
+  if(!blob){ const r = await fetch("fixtures/" + name, { cache: "no-store" }); if(!r.ok) throw new Error(name + " " + r.status); blob = await r.blob(); }
+  const A = document.getElementById("app").contentWindow.AnonLab;
+  await A.openFile(new File([blob], name));
+  return A.source();
+}
+// abre, ajusta (setup recebe o document do app), detecta e monta a saída sem baixar
+async function runFile(name, setup, blob){
+  const w = document.getElementById("app").contentWindow;
+  await openFixture(name, blob);
+  if(setup) await setup(w.document, w);
+  await w.AnonLab.detect();
+  if(setup?.after) await setup.after(w.document, w);
+  return w.AnonLab.buildOutput();
+}
+// grava em tests/.cache/out/ (PUT do tests/fake_hf.py), para o tests/verify_qualilab.mjs
+async function save(name, data){
+  const r = await fetch("/out/" + name, { method: "PUT", body: data });
+  if(!r.ok) throw new Error("PUT " + name + " " + r.status);
+  return name;
+}
+// o que foi aceito (os valores originais), no formato do codebook
+function accepted(){
+  const A = document.getElementById("app").contentWindow.AnonLab;
+  return [...new Set(A.entities().filter(e => e.accepted).flatMap(e => e.spans.map(s => s.value.trim())))];
+}
+// JSZip, a biblioteca que o QualiLab usa para ler e gravar o .qualilab em zip
+const jszip = async () => (await import("https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm")).default;
+
+window.harness = { loadPack, evalGolden, openFakeHub, evalHub, openFixture, runFile, save, accepted, jszip,
+                   app: () => document.getElementById("app").contentWindow,
                    doc: () => document.getElementById("app").contentDocument };
 </script>
 </body>

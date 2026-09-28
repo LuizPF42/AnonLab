@@ -17,7 +17,9 @@ navegador**: o texto que você cola **nunca sai do seu computador**. Ele não é
 enviado a nenhum servidor nem a nenhum modelo remoto; é o modelo que vem até o
 navegador. A ferramenta sugere o que anonimizar, mostrando o trecho ao redor
 para revisão, e substitui por pseudônimos consistentes (`[PESSOA_1]`,
-`[ENDERECO_2]`…). Quem decide o que sai é o pesquisador.
+`[ENDERECO_2]`…). Quem decide o que sai é o pesquisador. Aceita texto,
+planilhas (CSV) e projetos do [QualiLab](https://github.com/LuizPF42/QualiLab)
+(`.qualilab`), que saem pseudonimizados ou com a censura do QualiLab aplicada.
 
 **Testar online:** <https://luizpf42.github.io/AnonLab/anonimizador.html>
 (GitHub Pages). Também dá para baixar o `anonimizador.html` e abrir com duplo
@@ -27,12 +29,56 @@ fixar exatamente o código que roda.
 ## Uso rápido
 
 1. Abra o `anonimizador.html` (Chrome ou Edge recomendados; Firefox e Safari também funcionam).
-2. Cole o texto ou abra um `.txt`, ajuste as categorias e clique em **Detectar candidatos**.
+2. Cole o texto ou abra um arquivo (`.txt`, `.csv` ou `.qualilab`), ajuste as categorias e clique em **Detectar candidatos**.
 3. Revise a lista (aceitar/rejeitar), confira o resultado e **copie** ou **baixe**.
 
 Sem nada além do HTML, a detecção usa padrões com validação (CPF, CNPJ, e-mail,
 telefone, processo CNJ…), listas (estados, capitais, países), uma heurística
 de nomes e os seus termos livres.
+
+## Planilhas (CSV) e projetos do QualiLab
+
+O arquivo inteiro passa pela mesma detecção e pela mesma revisão, de uma vez.
+Por isso o mesmo nome recebe o mesmo rótulo em todas as linhas e documentos:
+a "Maria Souza" da coluna Nome e a que aparece numa resposta aberta viram o
+mesmo `[PESSOA_1]`. A revisão mostra onde está cada achado (linha e coluna, ou
+documento, título, memo).
+
+**CSV.** A planilha sai com a mesma estrutura: separador (`;`, `,`, tabulação,
+detectado sozinho), aspas, quebras de linha dentro das células, cabeçalho. O
+arquivo sai sempre em UTF-8; se o original era Windows-1252 (o "ANSI" do
+Excel), sai com BOM para o Excel reconhecer. Para cada coluna você escolhe:
+
+- **detectar no texto** (padrão): respostas abertas, observações;
+- **inteira é pessoa / e-mail / CPF / telefone…**: a célula toda vira um
+  rótulo, e o mesmo valor é trocado onde mais aparecer no arquivo;
+- **manter como está**: a coluna não é tocada (idade, nota, carimbo de data/hora).
+
+O cabeçalho sugere o tipo ("Nome", "E-mail", "CPF", "Telefone"…); confira antes
+de detectar.
+
+**QualiLab (`.qualilab`).** O projeto sai em duas versões possíveis:
+
+| | Censurar | Destruir |
+|---|---|---|
+| texto dos documentos | intacto | com os pseudônimos (`[PESSOA_1]`) no lugar dos dados |
+| o que muda | cada achado recebe o **código de censura** do QualiLab (⦸): a família nova `Censura (AnonLab)`, com um subcódigo por tipo, ou um código de censura que o projeto já tenha | todos os trechos codificados (e as discordâncias) são reancorados no texto novo; quem cobria um dado passa a cobrir o rótulo inteiro |
+| no QualiLab | o texto aparece na sua tela e sai mascarado nos relatórios (ATI, W3C), no que vai para a IA e no servidor MCP | o dado não existe mais no arquivo |
+| PDFs originais | vão junto | **não vão** (têm o texto cru) |
+| tem volta? | sim: basta tirar a censura | não |
+
+A censura do QualiLab não alcança título de documento, valor de categoria nem
+memo, e é justamente ali que o nome costuma escapar ("ENT-01 — Dra. Fulana de
+Tal"). Por isso, nas duas versões, o AnonLab pseudonimiza também títulos,
+memos, valores e opções de categoria, comentários de conexão, conversas e
+memória de IA, histórico e nomes de código (na censura dá para desligar).
+Os espelhos (pontos de restauração) não vão para a cópia, como na exportação
+do próprio QualiLab. A autoria (quem codificou) não é alterada.
+
+A cópia tem o sufixo "censurado (AnonLab)" ou "pseudonimizado (AnonLab)" no
+nome do projeto, e o histórico registra a operação. Ela serve de **cópia de
+publicação** no fluxo que o manual do QualiLab recomenda (seção 12.4): o
+original continua sendo o seu laboratório.
 
 ## Modelo de linguagem (NER, opcional)
 
@@ -155,6 +201,18 @@ divergir além do limite (`MIN_ENTITY_F1` no script).
 
 ```bash
 node tests/test_ner_core.mjs          # tokenizador, janelas e agregação vs. Python/HF
+node tests/test_formats.mjs           # CSV, zip, NFC, reancoramento, .qualilab (censurar e destruir)
+```
+
+O `test_formats.mjs --out PASTA` grava as saídas de um projeto de teste, e o
+`verify_qualilab.mjs` confere uma saída com o **código do próprio QualiLab**:
+o núcleo do servidor MCP do [QualiLab-plugin](https://github.com/LuizPF42/QualiLab-plugin)
+(extraído do app) abre o arquivo e responde como responderia a uma IA. Nenhum
+dado aceito pode aparecer, a busca por ele não pode achar nada e nenhuma âncora
+de censura pode estar quebrada:
+
+```bash
+node tests/verify_qualilab.mjs saida.qualilab codebook_REIDENTIFICA.csv --plugin ../QualiLab-plugin/plugins/qualilab/server
 ```
 
 Os vetores de `tests/vectors/` vêm do Python, com o tokenizador e o modelo
@@ -183,7 +241,12 @@ await harness.evalGolden()                     // vazamento sem modelo
 await harness.openFakeHub()                    // "🌐 Baixar modelos" contra o HF falso
 await harness.evalGolden()                     // vazamento com os modelos
 // ou o modo offline: await harness.app().openNerPack(await harness.loadPack(undefined, ["fp16"]))
+const o = await harness.runFile("qualilab_demo.qualilab")   // abre tests/fixtures/, detecta, monta a saída
+await harness.save("saida.qualilab", o.bytes)  // → tests/.cache/out/, para o verify_qualilab.mjs
 ```
+
+`tests/fixtures/` tem um CSV de pesquisa fictício e o projeto de demonstração
+do QualiLab (`examples/` do repositório dele, dados sintéticos, MIT).
 
 ## Desenho
 
@@ -214,6 +277,7 @@ abaixo pertencem aos seus autores e seguem as próprias licenças.
 - [transformers.js](https://github.com/huggingface/transformers.js) (Hugging Face, Apache-2.0): carrega e roda os modelos no navegador.
 - [ONNX Runtime Web](https://github.com/microsoft/onnxruntime) (Microsoft, MIT): execução em WebGPU e WebAssembly.
 - Na conversão dos modelos (`tools/build_ner_pack.py`): [PyTorch](https://github.com/pytorch/pytorch), [🤗 Transformers](https://github.com/huggingface/transformers), [ONNX](https://github.com/onnx/onnx), [onnxconverter-common](https://github.com/microsoft/onnxconverter-common) e [huggingface_hub](https://github.com/huggingface/huggingface_hub).
+- [QualiLab](https://github.com/LuizPF42/QualiLab) e [QualiLab-plugin](https://github.com/LuizPF42/QualiLab-plugin) (MIT): o formato `.qualilab`, a censura (`is_redaction`), o projeto de demonstração usado nos testes e o núcleo do servidor MCP usado para conferir as saídas. Nos testes do navegador, o [JSZip](https://github.com/Stuk/jszip) (MIT ou GPL-3.0), que o QualiLab usa para o `.qualilab` com PDF, confere a compatibilidade dos zips.
 
 **Dados e referências**
 

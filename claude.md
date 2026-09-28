@@ -143,7 +143,7 @@ models/<slug>/            anonlab-model.json (rótulos, label_map, variantes, va
   + codebook?          consistente por tipo
 ```
 
-1. **Entrada** — colar ou subir `.txt` (v0). Futuro: `.docx`, `.csv`, `.pdf`.
+1. **Entrada** — colar, ou abrir `.txt`, `.csv` e `.qualilab` (seção 10). Futuro: `.docx`, `.pdf`.
 2. **Detecção** — marcam-se as *caixinhas* (categorias) desejadas + termos
    livres. As camadas varrem o texto e produzem candidatos.
 3. **Revisão com contexto** — cada candidato aparece com um trecho ao redor
@@ -377,15 +377,66 @@ Comportamentos úteis:
 
 ## 10. Formatos de documento
 
-| Formato | v0 | Como |
+| Formato | Status | Como |
 |---|---|---|
 | Texto colado | ✅ | direto |
-| `.txt` | ✅ | `FileReader.readAsText` |
-| `.docx` | 🔜 | docx é um zip de XML; dá pra ler offline com um unzip puro-JS pequeno embutido; extrair `word/document.xml` |
-| `.csv` | 🔜 | anonimização por coluna (escolher colunas sensíveis) |
+| `.txt` | ✅ | UTF-8 ou Windows-1252 (`Formats.decodeText`) |
+| `.csv` / `.tsv` | ✅ v1.2 | por coluna: detectar, manter, ou "inteira é TIPO"; sai com a mesma estrutura |
+| `.qualilab` | ✅ v1.2 | censurar (código de censura do QualiLab) ou destruir (pseudônimo no texto, trechos reancorados) |
+| `.docx` | 🔜 | docx é um zip de XML: o leitor de zip do `.qualilab` já serve; extrair `word/document.xml` |
 | `.pdf` | 🔜 | extração de texto exige pdf.js (pesado); avaliar; OCR fora de escopo |
 
 Manter o princípio: qualquer lib usada é **embutida** no arquivo (ainda offline).
+O zip (store/deflate) é próprio, com `CompressionStream`/`DecompressionStream`
+do navegador, sem biblioteca.
+
+### 10.1 Arquivos com muitos textos (CSV, QualiLab)
+
+- **Um corpus só.** Cada célula (ou documento, título, memo, valor de categoria)
+  é um segmento, e os segmentos se juntam em um `SRCTEXT` separados por
+  `"\n\n.\n\n"`. Detectores, modelo e propagação rodam uma vez, e o mesmo valor
+  recebe o mesmo rótulo no arquivo todo. O ponto no separador importa: o
+  tokenizador ignora a quebra de linha, e o modelo lia o telefone de uma célula
+  e a idade da seguinte como um número só.
+- **Nada atravessa a fronteira** (`clipToSegments`): o que atravessa vira um
+  pedaço de cada lado; número do modelo fica só no pedaço onde começou.
+- **Offsets do original.** A detecção roda em NFC, mas a saída volta aos offsets
+  do texto original (`Formats.nfcView`/`toOrig`): no `.qualilab`, todo trecho
+  codificado se ancora em `documents[].content`, e o `quote` tem que ser a fatia
+  exata (o QualiLab confere, e na censura mascara o documento inteiro se não
+  bater).
+- **Escala.** A sobreposição usa um mapa de posições (`owner[i]` = span que cobre
+  o caractere i) e a propagação usa uma regex por bloco de valores: 20 mil
+  linhas (3,6 MB) detectam em ~3 s sem modelo. Antes era quadrático.
+- **Pedaços do mesmo valor.** Quando o valor inteiro, achado noutro lugar ("Tal,
+  Qual & Associados"), cobre pedaços do mesmo tipo que o modelo separou ("Tal" +
+  "Qual & Associados"), vale o inteiro, com um rótulo só.
+- **CSV.** Separador detectado pela contagem fora de aspas; RFC 4180 (aspas,
+  `""`, quebra de linha na célula); ida e volta byte a byte. Coluna "inteira é
+  TIPO" vira candidato de precedência 96, e o valor é procurado no resto do
+  arquivo (a pessoa da coluna Nome citada numa resposta aberta).
+- **QualiLab** (formato lido do código do app, `docs/index.html`, e do
+  QualiLab-plugin): JSON, ou zip com `project.json` + `pdfs/<id>.pdf` +
+  `pdfindex/<id>.json`. Censura = códigos `is_redaction` (preto: `hue_deg:-2`);
+  vale para trechos de qualquer camada. O AnonLab cria a família
+  `Censura (AnonLab)` com um subcódigo por tipo (a família não recebe trechos),
+  ou usa um código de censura já existente; trecho já coberto por censura não é
+  repetido. Os trechos novos saem na camada final, autor "AnonLab",
+  `source:"manual"`, e o histórico ganha um `bulk_coding` (ou um `text_edited`
+  por documento, na destruição), ops do catálogo do QualiLab.
+- **Destruir** reancora codificações e discordâncias (`Formats.replaceSpans`:
+  quem começa ou termina dentro de um dado passa a cobrir o rótulo inteiro), tira
+  os PDFs (`has_pdf:false`, `pdf_region:null`) e sai em JSON.
+- **O que a censura não alcança** (título, memo, valor e opção de categoria,
+  comentário de conexão, nome de código, IA, histórico) é pseudonimizado nos dois
+  modos (na censura, opcional e marcado). Título, memo, valor, opção e
+  comentário passam pela detecção e pela revisão; o resto recebe a troca dos
+  valores aceitos (`makeSubst`, nome só com inicial maiúscula). Espelhos
+  (`snapshots`, cópias inteiras do projeto) nunca vão para a cópia. Autoria
+  (quem codificou) não muda.
+- **Conferência com o próprio QualiLab:** `tests/verify_qualilab.mjs` abre a
+  saída com o núcleo do servidor MCP do QualiLab-plugin e confere que nada do
+  que foi aceito chega à IA (documentos, trechos, memos, busca).
 
 ---
 
@@ -404,8 +455,11 @@ Manter o princípio: qualquer lib usada é **embutida** no arquivo (ainda offlin
   - Falta: presets por tipo de pesquisa; fusão de entidades ("João" com "João
     da Silva"); atalhos de teclado; mais detectores (PIX, IBAN, CID); aviso de
     quase-identificadores.
-- **v2:** `.docx` (in/out preservando formatação básica); `.csv` por coluna;
-  perfis salvos (export/import de config como JSON, ainda offline).
+- **v2:** `.docx` (in/out preservando formatação básica); perfis salvos
+  (export/import de config como JSON, ainda offline).
+- **v1.2 (feito):** `.csv` por coluna e `.qualilab` (censurar ou destruir),
+  seção 10.1; detecção em corpus de muitos segmentos, com sobreposição e
+  propagação lineares.
 - **v1.1 (feito):** modelos baixados do Hugging Face no próprio navegador
   (runtime do jsDelivr com SHA-256, cache do navegador, carregar sozinho);
   padrão com modelos já publicados em ONNX, sem conta; `tools/publish_hub.py`
@@ -436,6 +490,10 @@ Manter o princípio: qualquer lib usada é **embutida** no arquivo (ainda offlin
    aparece no cartão e no README); OpenMed é Apache-2.0; legal-bert-lgpd e
    HAREM são MIT; os modelos LeNER-Br do pierreguillou não declaram licença, e
    o script não os publica.
+8. **Autoria na cópia do QualiLab:** hoje os nomes de quem codificou ficam.
+   Vale oferecer "ocultar autoria", como o ATI/W3C do QualiLab já fazem?
+9. **Formas curtas do mesmo nome:** "Banca Exemplo" e "Banca Exemplo Advogados"
+   saem com rótulos diferentes (é a fusão de entidades do roadmap).
 
 ---
 
